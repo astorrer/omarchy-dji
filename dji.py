@@ -7,10 +7,13 @@
   dji.py watch  [--interval SEC] [--dest TEMPLATE] [--no-photos] [--proxies]
 
 Media lands in TEMPLATE/YYYY-MM-DD/, where TEMPLATE defaults to
-~/Videos/{model} and {model} is the camera's short name (OsmoAction4 ->
-Action4). Copies are written to a hidden .part file, fsynced, and renamed into
+~/Videos/{model} and {model} is the name the camera reports (OsmoAction4).
+Missing folders are created; nothing in the destination is ever overwritten
+or deleted. A card file counts as imported when a file with the same name and
+size exists anywhere under the destination, so a reorganized library is not
+re-copied. Copies are written to a hidden .part file, fsynced, and renamed into
 place; --move deletes a card file only after its copy is re-read from disk and
-its hash matches. Files already imported (same name and size) are skipped.
+its hash matches.
 """
 
 import argparse
@@ -142,12 +145,10 @@ def sniff_model(path):
     return m.group(1).decode() if m else ""
 
 
-def short_model(model):
-    """Folder-friendly camera name: OsmoAction4 -> Action4, Osmo360 -> Osmo360."""
+def folder_name(model):
+    """The camera's own name, made safe for a path: "DJI OsmoAction4" -> OsmoAction4."""
     model = re.sub(r"^DJI\s*", "", model or "", flags=re.I)
     model = re.sub(r"[^A-Za-z0-9._-]", "", model).lstrip(".")
-    if re.match(r"^Osmo[A-Za-z]", model):
-        model = model[4:]
     return model or "DJI"
 
 
@@ -172,8 +173,51 @@ def day_for(path, name):
         return "unsorted"
 
 
+def library_index(dest, limit=500_000):
+    """name -> [(size, path)] for every file already under dest, at any depth.
+
+    Lets a library the user has reorganized (or one that predates this tool)
+    count as imported, so nothing is copied twice. Hidden entries are skipped.
+    """
+    index = {}
+    seen = 0
+    for root, dirs, files in os.walk(dest):
+        dirs[:] = [d for d in dirs if not d.startswith(".")]
+        for name in files:
+            if name.startswith("."):
+                continue
+            path = Path(root) / name
+            try:
+                size = path.stat().st_size
+            except OSError:
+                continue
+            index.setdefault(name, []).append((size, path))
+            seen += 1
+            if seen >= limit:
+                return index
+    return index
+
+
+def check_dest(dest, card_mount=None):
+    """Why dest cannot be imported into, or None when it is safe to use."""
+    if card_mount:
+        card = os.path.realpath(card_mount)
+        real = os.path.realpath(dest)
+        if real == card or real.startswith(card.rstrip("/") + "/"):
+            return f"{dest} is on the card itself"
+    for probe in [dest, *dest.parents]:
+        if os.path.lexists(probe):
+            if not probe.is_dir():
+                return f"{probe} exists but is not a folder"
+            if not os.access(probe, os.W_OK | os.X_OK):
+                return f"{probe} is not writable"
+            return None
+    return None
+
+
 def scan(card_folders, dest, photos=True, proxies=False):
     """Every importable file on the card with its target and status."""
+    index = library_index(dest)
     want = {"video"} | ({"photo"} if photos else set()) | ({"proxy"} if proxies else set())
     items = []
     for folder in card_folders:
@@ -187,13 +231,15 @@ def scan(card_folders, dest, photos=True, proxies=False):
                 continue
             size = src.stat().st_size
             target = dest / day_for(src, src.name) / src.name
-            if not target.exists():
-                status = "new"
-            elif target.stat().st_size == size:
+            found = next((path for s, path in index.get(src.name, []) if s == size), None)
+            if found:
                 status = "imported"
-            else:
+            elif os.path.lexists(target):
                 status = "conflict"
-            items.append({"src": src, "name": src.name, "kind": kind, "size": size, "target": target, "status": status})
+            else:
+                status = "new"
+            items.append({"src": src, "name": src.name, "kind": kind, "size": size, "target": target,
+                          "found": found, "status": status})
     return items
 
 
@@ -250,12 +296,14 @@ def status(dest_template=DEFAULT_DEST, photos=True, proxies=False, mounts_text=N
     mounted_usb = set()
     for card in find_cards(mounts_text, sysroot):
         model = card_model(card)
-        folder = short_model(model)
+        folder = folder_name(model)
         entry = {"mount": card["mount"], "label": os.path.basename(card["mount"]), "device": card["device"],
                  "model": model, "folder": folder, "connection": "usb" if card["usbProduct"] else "card"}
         try:
             dest = expand_dest(dest_template, folder, home)
             entry["dest"] = str(dest)
+            entry["destExists"] = dest.is_dir()
+            entry["destError"] = check_dest(dest, card["mount"])
             entry.update(summarize(scan(card["folders"], dest, photos, proxies)))
         except ValueError as exc:
             error = str(exc)
@@ -326,9 +374,13 @@ def run_import(card_mount=None, dest_template=DEFAULT_DEST, photos=True, proxies
     card = cards[0]
     model = card_model(card)
     try:
-        dest = expand_dest(dest_template, short_model(model), home)
+        dest = expand_dest(dest_template, folder_name(model), home)
     except ValueError as exc:
         emit({"event": "error", "message": str(exc)})
+        return 1
+    problem = check_dest(dest, card["mount"])
+    if problem:
+        emit({"event": "error", "message": problem})
         return 1
 
     items = scan(card["folders"], dest, photos, proxies)
@@ -366,7 +418,7 @@ def run_import(card_mount=None, dest_template=DEFAULT_DEST, photos=True, proxies
                 digest = copy_file(item["src"], item["target"], on_bytes, verify=move)
                 copied += 1
             else:
-                digest = hash_file(item["target"], drop_cache=True)
+                digest = hash_file(item["found"], drop_cache=True)
                 skipped += 1
             if move:
                 if hash_file(item["src"]) != digest:
@@ -398,7 +450,10 @@ def print_status(state):
     for c in state["cards"]:
         counts = c.get("counts", {})
         print(f"{c['model']} ({c['connection']}) at {c['mount']}")
-        print(f"  import to: {c['dest']}")
+        note = "existing folder" if c.get("destExists") else "will be created"
+        print(f"  import to: {c['dest']} ({note})")
+        if c.get("destError"):
+            print(f"  cannot import: {c['destError']}", file=sys.stderr)
         for kind in ("video", "photo", "proxy"):
             k = counts.get(kind)
             if k and k["total"]:

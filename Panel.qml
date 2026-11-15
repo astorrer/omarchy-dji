@@ -23,6 +23,7 @@ Panel {
   readonly property var card: dji.card
   readonly property string cameraName: card ? Model.displayName(card.folder) : ""
   readonly property int pending: Model.newFiles(card)
+  readonly property string destProblem: card && typeof card.destError === "string" ? card.destError.slice(0, 300) : ""
   readonly property real fraction: Model.percent(dji.progress.bytes, dji.progress.total)
   readonly property string barLabel: dji.importing
     ? Math.round(fraction * 100) + "%"
@@ -209,6 +210,18 @@ Panel {
                 font.pixelSize: Style.font.caption
                 elide: Text.ElideMiddle
               }
+              Text {
+                Layout.fillWidth: true
+                visible: root.card !== null && root.card.dest !== ""
+                textFormat: Text.PlainText
+                text: root.destProblem !== ""
+                  ? strings.t("dest.error").arg(root.destProblem)
+                  : strings.t(root.card && root.card.destExists ? "dest.exists" : "dest.willCreate")
+                color: root.destProblem !== "" ? root.urgent : root.dim
+                font.family: root.fontFamily
+                font.pixelSize: Style.font.caption
+                wrapMode: Text.WordWrap
+              }
             }
 
             PanelActionButton {
@@ -328,7 +341,7 @@ Panel {
         Button {
           width: parent.width
           visible: root.card !== null || dji.importing
-          enabled: dji.importing ? !dji.cancelling : root.pending > 0
+          enabled: dji.importing ? !dji.cancelling : (root.pending > 0 && root.destProblem === "")
           iconText: dji.importing ? "󰜺" : "󰇚"
           text: dji.importing
             ? strings.t(dji.cancelling ? "import.cancelling" : "import.cancel")

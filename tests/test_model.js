@@ -16,9 +16,9 @@ test("validDest", () => {
 })
 
 test("displayName", () => {
-  assert.strictEqual(M.displayName("Action4"), "Action 4")
-  assert.strictEqual(M.displayName("Action5Pro"), "Action 5 Pro")
-  assert.strictEqual(M.displayName("Pocket3"), "Pocket 3")
+  assert.strictEqual(M.displayName("OsmoAction4"), "Osmo Action 4")
+  assert.strictEqual(M.displayName("OsmoAction5Pro"), "Osmo Action 5 Pro")
+  assert.strictEqual(M.displayName("OsmoPocket3"), "Osmo Pocket 3")
   assert.strictEqual(M.displayName("Osmo360"), "Osmo 360")
   assert.strictEqual(M.displayName(""), "DJI")
 })

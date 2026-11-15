@@ -28,7 +28,7 @@
       {
         "key": "importPath",
         "type": "string",
-        "label": "Import path ({model} becomes e.g. Action4)",
+        "label": "Import path ({model} becomes e.g. OsmoAction4)",
         "defaultValue": "~/Videos/{model}"
       },
       {

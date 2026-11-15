@@ -63,13 +63,13 @@ class DetectTests(unittest.TestCase):
     def tearDown(self):
         self.fx.close()
 
-    def test_short_model(self):
-        self.assertEqual(dji.short_model("OsmoAction4"), "Action4")
-        self.assertEqual(dji.short_model("DJI OsmoPocket3"), "Pocket3")
-        self.assertEqual(dji.short_model("Osmo360"), "Osmo360")
-        self.assertEqual(dji.short_model("../evil"), "evil")
-        self.assertEqual(dji.short_model(""), "DJI")
-        self.assertEqual(dji.short_model(".."), "DJI")
+    def test_folder_name(self):
+        self.assertEqual(dji.folder_name("OsmoAction4"), "OsmoAction4")
+        self.assertEqual(dji.folder_name("DJI OsmoPocket3"), "OsmoPocket3")
+        self.assertEqual(dji.folder_name("Osmo360"), "Osmo360")
+        self.assertEqual(dji.folder_name("../evil"), "evil")
+        self.assertEqual(dji.folder_name(""), "DJI")
+        self.assertEqual(dji.folder_name(".."), "DJI")
 
     def test_expand_dest(self):
         self.assertEqual(dji.expand_dest("~/Videos/{model}", "Action4", "/h"), Path("/h/Videos/Action4"))
@@ -93,7 +93,9 @@ class DetectTests(unittest.TestCase):
         card = state["cards"][0]
         self.assertEqual(card["model"], "OsmoAction4")
         self.assertEqual(card["connection"], "usb")
-        self.assertEqual(card["dest"], str(self.fx.home / "Videos/Action4"))
+        self.assertEqual(card["dest"], str(self.fx.home / "Videos/OsmoAction4"))
+        self.assertFalse(card["destExists"])
+        self.assertIsNone(card["destError"])
         self.assertEqual(card["counts"]["video"], {"total": 1, "new": 1})
         self.assertEqual(card["counts"]["photo"], {"total": 1, "new": 1})
         self.assertEqual(card["counts"]["proxy"], {"total": 0, "new": 0})
@@ -137,12 +139,12 @@ class CardReaderTests(unittest.TestCase):
         self.fx.add("DJI_20261115115741_0001_D.MP4", mp4_with_model(b"DJI OsmoAction5Pro"))
         card = dji.status(**self.fx.kw())["cards"][0]
         self.assertEqual(card["model"], "OsmoAction5Pro")
-        self.assertEqual(card["folder"], "Action5Pro")
+        self.assertEqual(card["folder"], "OsmoAction5Pro")
         self.assertEqual(card["connection"], "card")
 
     def test_model_sniffed_from_jpg(self):
         self.fx.add("DJI_20261115115741_0001_D.JPG", b"\xff\xd8 exif DJI OsmoPocket3 \x00")
-        self.assertEqual(dji.status(**self.fx.kw())["cards"][0]["folder"], "Pocket3")
+        self.assertEqual(dji.status(**self.fx.kw())["cards"][0]["folder"], "OsmoPocket3")
 
     def test_unknown_model_falls_back(self):
         self.fx.add("DJI_20261115115741_0001_D.MP4", b"not an mp4")
@@ -161,7 +163,7 @@ class ImportTests(unittest.TestCase):
         return dji.run_import(emit=self.events.append, **self.fx.kw(), **kw)
 
     def dest(self, day, name):
-        return self.fx.home / "Videos/Action4" / day / name
+        return self.fx.home / "Videos/OsmoAction4" / day / name
 
     def done(self):
         return [e for e in self.events if e["event"] == "done"][-1]
@@ -307,6 +309,95 @@ class ProgressTests(unittest.TestCase):
               "dryRun": False})
         emit({"event": "progress", "bytes": 50, "total": 100})
         self.assertNotIn("━", out.getvalue())
+
+
+class LibraryTests(unittest.TestCase):
+    """An import folder that already exists, possibly organized by hand."""
+
+    def setUp(self):
+        self.fx = Fixture()
+        self.events = []
+        self.lib = self.fx.home / "Videos/OsmoAction4"
+
+    def tearDown(self):
+        self.fx.close()
+
+    def run_import(self, **kw):
+        return dji.run_import(emit=self.events.append, **self.fx.kw(), **kw)
+
+    def done(self):
+        return [e for e in self.events if e["event"] == "done"][-1]
+
+    def test_reorganized_files_count_as_imported(self):
+        v = self.fx.add("DJI_20261115115741_0001_D.MP4", b"v" * 100)
+        trip = self.lib / "Moab trip/raw"
+        trip.mkdir(parents=True)
+        (trip / v.name).write_bytes(b"v" * 100)
+        (self.lib / "notes.txt").write_text("mine")
+        card = dji.status(**self.fx.kw())["cards"][0]
+        self.assertTrue(card["destExists"])
+        self.assertEqual(card["newFiles"], 0)
+        self.assertEqual(self.run_import(), 0)
+        self.assertEqual(self.done()["copied"], 0)
+        self.assertFalse((self.lib / "2026-11-15").exists(), "no duplicate copy")
+        self.assertEqual((self.lib / "notes.txt").read_text(), "mine")
+
+    def test_move_verifies_against_the_reorganized_copy(self):
+        v = self.fx.add("DJI_20261115115741_0001_D.MP4", b"v" * 100)
+        trip = self.lib / "Moab trip"
+        trip.mkdir(parents=True)
+        (trip / v.name).write_bytes(b"v" * 100)
+        self.assertEqual(self.run_import(move=True), 0)
+        self.assertFalse(v.exists())
+        self.assertEqual(self.done()["deleted"], 1)
+
+    def test_same_name_different_size_elsewhere_is_copied_alongside(self):
+        v = self.fx.add("DJI_20261115115741_0001_D.MP4", b"v" * 100)
+        (self.lib / "old").mkdir(parents=True)
+        (self.lib / "old" / v.name).write_bytes(b"other")
+        self.assertEqual(self.run_import(), 0)
+        self.assertEqual((self.lib / "old" / v.name).read_bytes(), b"other")
+        self.assertEqual((self.lib / "2026-11-15" / v.name).read_bytes(), b"v" * 100)
+
+    def test_hidden_part_files_do_not_count(self):
+        v = self.fx.add("DJI_20261115115741_0001_D.MP4", b"v" * 100)
+        day = self.lib / "2026-11-15"
+        day.mkdir(parents=True)
+        (day / f".{v.name}.part").write_bytes(b"v" * 100)
+        self.assertEqual(dji.status(**self.fx.kw())["cards"][0]["newFiles"], 1)
+
+    def test_dest_on_the_card_is_refused(self):
+        self.fx.add("DJI_20261115115741_0001_D.MP4")
+        dest = str(self.fx.mount / "backup")
+        self.assertEqual(self.run_import(dest_template=dest), 1)
+        self.assertIn("on the card", self.events[-1]["message"])
+        self.assertIn("on the card", dji.status(dest_template=dest, **self.fx.kw())["cards"][0]["destError"])
+
+    def test_dest_through_a_file_is_refused(self):
+        self.fx.add("DJI_20261115115741_0001_D.MP4")
+        (self.fx.home / "Videos").write_text("not a folder")
+        self.assertEqual(self.run_import(), 1)
+        self.assertIn("not a folder", self.events[-1]["message"])
+
+    @unittest.skipIf(os.geteuid() == 0, "root ignores permissions")
+    def test_unwritable_dest_is_refused(self):
+        self.fx.add("DJI_20261115115741_0001_D.MP4")
+        self.lib.mkdir(parents=True)
+        self.lib.chmod(0o555)
+        try:
+            self.assertEqual(self.run_import(), 1)
+            self.assertIn("not writable", self.events[-1]["message"])
+        finally:
+            self.lib.chmod(0o755)
+
+    def test_symlinked_library_is_followed(self):
+        v = self.fx.add("DJI_20261115115741_0001_D.MP4", b"v" * 100)
+        nas = Path(self.fx.tmp.name) / "nas"
+        (nas / "2026-11-15").mkdir(parents=True)
+        (nas / "2026-11-15" / v.name).write_bytes(b"v" * 100)
+        (self.fx.home / "Videos").mkdir()
+        self.lib.symlink_to(nas)
+        self.assertEqual(dji.status(**self.fx.kw())["cards"][0]["newFiles"], 0)
 
 
 class Mp4Tests(unittest.TestCase):

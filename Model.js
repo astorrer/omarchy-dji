@@ -10,10 +10,10 @@ function validDest(value) {
   return text === "" ? DEFAULT_DEST : text
 }
 
-// "Action5Pro" -> "Action 5 Pro", "Pocket3" -> "Pocket 3".
+// "OsmoAction5Pro" -> "Osmo Action 5 Pro", "Osmo360" -> "Osmo 360".
 function displayName(folder) {
   var text = String(folder || "DJI")
-  return text.replace(/([a-z])(\d)/g, "$1 $2").replace(/(\d)([A-Z])/g, "$1 $2")
+  return text.replace(/([a-z])([A-Z])/g, "$1 $2").replace(/([a-z])(\d)/g, "$1 $2").replace(/(\d)([A-Z])/g, "$1 $2")
 }
 
 function formatBytes(bytes, formatNumber) {

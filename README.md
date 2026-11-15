@@ -6,7 +6,7 @@ is connected. The panel shows what's new on the card and copies it into
 dated folders:
 
 ```
-~/Videos/Action4/
+~/Videos/OsmoAction4/
 ├── 2026-11-14/
 │   ├── DJI_20261114093012_0001_D.MP4
 │   └── DJI_20261114093544_0002_D.JPG
@@ -35,7 +35,7 @@ library). Nothing runs as root, and the plugin makes no network calls.
 
 | Setting | Default | |
 |---|---|---|
-| Import path | `~/Videos/{model}` | `{model}` is the camera's short name, e.g. `Action4`, `Pocket3`. Pick a folder with the 󰉋 button, or type a template in the widget settings. |
+| Import path | `~/Videos/{model}` | `{model}` is the name the camera reports, e.g. `OsmoAction4`, `OsmoPocket3`. Pick a folder with the 󰉋 button, or type a template in the widget settings. |
 | Include photos | on | JPG/DNG stills go next to the clips. |
 | Include LRF proxies | off | The camera's low-res proxy copies. |
 | Remove from card after import | off | Deletes each card file only after its copy has been fsynced, re-read from disk, and its hash compared with the original. |
@@ -45,6 +45,20 @@ library). Nothing runs as root, and the plugin makes no network calls.
 On the bar icon, a right-click rescans and a middle-click opens the import
 folder. With the panel open, <kbd>Enter</kbd> imports, <kbd>o</kbd> opens the
 folder, and <kbd>r</kbd> rescans.
+
+## Existing folders
+
+It's safe to point the import path at a folder you already use:
+
+- Nothing in the destination is ever overwritten, moved, or deleted. New files
+  only go into `YYYY-MM-DD/` subfolders.
+- If a different file with the same name is already sitting in a date folder,
+  the import reports it and leaves both files alone.
+- Only missing folders are created. Existing folders and their permissions
+  aren't touched.
+- The import won't start if the path is on the card itself, goes through a
+  file instead of a folder, or isn't writable.
+- A symlinked destination, for example a NAS mount, works fine.
 
 ## How it works
 
@@ -65,9 +79,10 @@ Detection:
 - **Camera model:** read from the USB device (vendor `2ca3`) when the camera
   itself is connected. With a card reader, it's taken from the clip's MP4
   metadata or the photo's EXIF.
-- **Folder name:** `OsmoAction4` → `Action4`.
+- **Folder name:** the name the camera reports, e.g. `OsmoAction4`.
 - **Already imported:** a file counts as imported when one with the same name
-  and size is in the destination. Later imports pick up only new files.
+  and size is anywhere inside the import folder. If you've reorganized the
+  library, say into trip folders, nothing gets copied twice.
 - **Wrong USB mode:** if the camera is plugged in but no card is mounted
   (webcam mode), the panel tells you to switch it to Transfer mode.
 
