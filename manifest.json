@@ -1,0 +1,66 @@
+{
+  "schemaVersion": 1,
+  "id": "io.github.astorrer.omarchy-dji",
+  "name": "DJI Import",
+  "version": "0.1.0",
+  "author": "Aaron Storrer",
+  "license": "MIT",
+  "description": "Detects a DJI Osmo camera (Action, Pocket, 360) or its card and imports videos and photos into ~/Videos/<model>/YYYY-MM-DD, with verified copies and optional removal from the card.",
+  "kinds": ["bar-widget"],
+  "entryPoints": {
+    "barWidget": "Panel.qml"
+  },
+  "barWidget": {
+    "displayName": "DJI Import",
+    "description": "Shows up when a DJI camera or card is connected and imports its media into dated folders.",
+    "category": "Files",
+    "allowMultiple": false,
+    "defaultSection": "right",
+    "defaults": {
+      "importPath": "~/Videos/{model}",
+      "includePhotos": true,
+      "includeProxies": false,
+      "deleteAfterImport": false,
+      "notifyOnConnect": true,
+      "alwaysShowIcon": false
+    },
+    "schema": [
+      {
+        "key": "importPath",
+        "type": "string",
+        "label": "Import path ({model} becomes e.g. Action4)",
+        "defaultValue": "~/Videos/{model}"
+      },
+      {
+        "key": "includePhotos",
+        "type": "boolean",
+        "label": "Include photos",
+        "defaultValue": true
+      },
+      {
+        "key": "includeProxies",
+        "type": "boolean",
+        "label": "Include .LRF low-res proxies",
+        "defaultValue": false
+      },
+      {
+        "key": "deleteAfterImport",
+        "type": "boolean",
+        "label": "Remove files from the card after a verified import",
+        "defaultValue": false
+      },
+      {
+        "key": "notifyOnConnect",
+        "type": "boolean",
+        "label": "Notify when a camera with new media is connected",
+        "defaultValue": true
+      },
+      {
+        "key": "alwaysShowIcon",
+        "type": "boolean",
+        "label": "Show the bar icon even when no camera is connected",
+        "defaultValue": false
+      }
+    ]
+  }
+}

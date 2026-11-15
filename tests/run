@@ -1,0 +1,86 @@
+#!/usr/bin/env bash
+# Run the checks that should stay green on main.
+set -euo pipefail
+
+ROOT=$(cd "$(dirname "$0")/.." && pwd)
+cd "$ROOT"
+failed=0
+
+run() {
+  local name=$1
+  shift
+  echo "==> $name"
+  if "$@"; then
+    echo "ok $name"
+  else
+    echo "FAIL $name"
+    failed=1
+  fi
+}
+
+if command -v ruff >/dev/null 2>&1; then
+  run "ruff" ruff check .
+else
+  echo "skip ruff (ruff not on PATH)"
+fi
+
+run "manifest" python3 - <<'PY'
+import json
+import re
+from pathlib import Path
+
+manifest = json.loads(Path("manifest.json").read_text())
+bw = manifest["barWidget"]
+assert manifest["schemaVersion"] == 1
+assert manifest["id"] == "io.github.astorrer.omarchy-dji"
+assert re.fullmatch(r"\d+\.\d+\.\d+", manifest["version"])
+assert manifest["kinds"] == ["bar-widget"]
+assert manifest["entryPoints"] == {"barWidget": "Panel.qml"}
+keys = [s["key"] for s in bw["schema"]]
+assert sorted(keys) == sorted(bw["defaults"]), "schema keys must match defaults"
+for item in bw["schema"]:
+    assert item["defaultValue"] == bw["defaults"][item["key"]], item["key"]
+qml = Path("Service.qml").read_text() + Path("Panel.qml").read_text()
+for key in keys:
+    assert f'"{key}"' in qml, f"setting {key} is never read in QML"
+en = json.loads(Path("i18n/en.json").read_text())
+used = set(re.findall(r'(?<![A-Za-z])(?:t|tn)\("([a-zA-Z.]+)"', qml))
+missing = sorted(k for k in used if k not in en)
+assert not missing, f"i18n keys missing from en.json: {missing}"
+print("manifest ok")
+PY
+
+if command -v node >/dev/null 2>&1; then
+  run "model" node tests/test_model.js
+else
+  echo "skip model (node not on PATH)"
+fi
+
+run "dji" python3 tests/test_dji.py
+
+if command -v omarchy >/dev/null 2>&1; then
+  validate_dir=$(mktemp -d)
+  while IFS= read -r -d ''; do cp --parents "$REPLY" "$validate_dir"; done \
+    < <(git ls-files -z --cached --others --exclude-standard)
+  run "plugin-validate" omarchy plugin validate "$validate_dir"
+  rm -rf "$validate_dir"
+else
+  echo "skip plugin-validate (omarchy not on PATH)"
+fi
+
+OMARCHY_PATH=${OMARCHY_PATH:-/usr/share/omarchy}
+QMLLINT=$(command -v qmllint || echo /usr/lib/qt6/bin/qmllint)
+if [[ -x $QMLLINT ]] && [[ -d $OMARCHY_PATH/shell ]]; then
+  lint_dir=$(mktemp -d)
+  ln -s "$OMARCHY_PATH/shell" "$lint_dir/qs"
+  run "qmllint" "$QMLLINT" -I "$lint_dir" -I "$OMARCHY_PATH/shell" Panel.qml Service.qml Model.js
+  rm -rf "$lint_dir"
+else
+  echo "skip qmllint"
+fi
+
+if (( failed )); then
+  echo "tests failed"
+  exit 1
+fi
+echo "all ok"
