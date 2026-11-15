@@ -14,6 +14,8 @@ dated folders:
     └── DJI_20261115115741_0001_D.MP4
 ```
 
+![DJI Import panel importing from an Osmo Action 4 card](preview.png)
+
 It isn't affiliated with or endorsed by DJI. Plugins run unsandboxed inside
 `omarchy-shell`.
 
