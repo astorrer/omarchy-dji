@@ -23,11 +23,13 @@ Panel {
   readonly property var card: dji.card
   readonly property string cameraName: card ? Model.displayName(card.folder) : ""
   readonly property int pending: Model.newFiles(card)
+  readonly property int importedCount: Model.importedFiles(card)
+  property bool cleanConfirmOpen: false
   readonly property string destProblem: card && typeof card.destError === "string" ? card.destError.slice(0, 300) : ""
   readonly property real fraction: Model.percent(dji.progress.bytes, dji.progress.total)
   readonly property string tooltip: {
     if (dji.importing)
-      return strings.t("tooltip.importing").arg(Math.round(fraction * 100))
+      return strings.t(dji.job === "clean" ? "tooltip.cleaning" : "tooltip.importing").arg(Math.round(fraction * 100))
         .arg(dji.progress.index).arg(dji.progress.files)
     if (card) return strings.t("tooltip.card").arg(cameraName).arg(pending)
     if (dji.state.unmounted.length) return strings.t("tooltip.unmounted").arg(dji.state.unmounted[0])
@@ -56,6 +58,11 @@ Panel {
     if (!r) return ""
     if (r.kind === "cancelled") return strings.t("result.cancelled")
     if (r.kind === "error") return strings.t("result.failed").arg(r.message)
+    if (r.mode === "clean") {
+      var cleaned = [strings.tn("result.removed", r.deleted).arg(r.deleted)]
+      if (r.kept > 0) cleaned.push(strings.tn("result.kept", r.kept).arg(r.kept))
+      return cleaned.join(" · ")
+    }
     var parts = [strings.tn("result.copied", r.copied).arg(r.copied)]
     if (r.renamed > 0) parts.push(strings.tn("result.renamed", r.renamed).arg(r.renamed))
     if (r.skipped > 0) parts.push(strings.tn("result.skipped", r.skipped).arg(r.skipped))
@@ -67,7 +74,8 @@ Panel {
   implicitWidth: visible ? button.implicitWidth : 0
   implicitHeight: button.implicitHeight
 
-  onOpenedChanged: if (opened) {
+  onOpenedChanged: if (!opened) cleanConfirmOpen = false
+  else {
     if (!dji.importing) dji.restartWatch()
     Qt.callLater(function() { if (panel.loadedContent) panel.loadedContent.forceActiveFocus() })
   }
@@ -91,6 +99,13 @@ Panel {
     function refresh(): string { dji.restartWatch(); return "ok" }
     function startImport(): string { dji.startImport(); return dji.importing ? "importing" : "no card" }
     function cancel(): string { dji.cancelImport(); return "ok" }
+    // Opens the confirmation only; nothing is deleted until it is accepted.
+    function cleanUp(): string {
+      if (!root.card || root.importedCount === 0 || dji.importing) return "nothing to clean"
+      root.open()
+      root.cleanConfirmOpen = true
+      return "confirm in panel"
+    }
   }
 
   BarIconButton {
@@ -127,10 +142,22 @@ Panel {
     content: PanelKeyCatcher {
       implicitHeight: column.implicitHeight
       anchors.fill: parent
-      onActivateRequested: if (!dji.importing) dji.startImport()
-      onCloseRequested: root.close()
-      onTabRequested: function(direction) { root.switchPanel(direction) }
+      onActivateRequested: {
+        if (root.cleanConfirmOpen) {
+          if (cleanConfirm.selectedIndex === 1) cleanConfirm.confirmed()
+          else cleanConfirm.canceled()
+        } else if (!dji.importing) dji.startImport()
+      }
+      onCloseRequested: root.cleanConfirmOpen ? cleanConfirm.canceled() : root.close()
+      onMoveRequested: function(dx, dy) {
+        if (root.cleanConfirmOpen && dx !== 0) cleanConfirm.selectedIndex = cleanConfirm.selectedIndex === 0 ? 1 : 0
+      }
+      onTabRequested: function(direction) {
+        if (root.cleanConfirmOpen) cleanConfirm.selectedIndex = cleanConfirm.selectedIndex === 0 ? 1 : 0
+        else root.switchPanel(direction)
+      }
       onTextKey: function(t) {
+        if (root.cleanConfirmOpen) return
         if (t === "o" || t === "O") dji.openFolder()
         else if (t === "r" || t === "R") dji.restartWatch()
         else if (t === "i" || t === "I") dji.startImport()
@@ -142,7 +169,19 @@ Panel {
         spacing: Style.space(12)
 
         PanelHero {
+          id: hero
           width: parent.width
+          trailingControl: Component {
+            PanelActionButton {
+              visible: dji.connected
+              iconText: "󰑐"
+              tooltipText: strings.t("refresh")
+              foreground: hero.foreground
+              fontFamily: hero.fontFamily
+              enabled: !dji.importing
+              onClicked: dji.restartWatch()
+            }
+          }
           title: root.card ? root.cameraName : strings.t("title")
           meta: root.card
             ? strings.t(root.card.connection === "usb" ? "card.viaUsb" : "card.viaReader").arg(root.card.label)
@@ -305,7 +344,7 @@ Panel {
             }
           }
           BodyText {
-            text: strings.t("import.progress")
+            text: strings.t(dji.job === "clean" ? "clean.progress" : "import.progress")
               .arg(dji.progress.index).arg(dji.progress.files)
               .arg(root.bytes(dji.progress.bytes)).arg(root.bytes(dji.progress.total))
           }
@@ -339,7 +378,7 @@ Panel {
           enabled: dji.importing ? !dji.cancelling : (root.pending > 0 && root.destProblem === "")
           iconText: dji.importing ? "󰜺" : "󰇚"
           text: dji.importing
-            ? strings.t(dji.cancelling ? "import.cancelling" : "import.cancel")
+            ? strings.t(dji.cancelling ? "import.cancelling" : (dji.job === "clean" ? "clean.cancel" : "import.cancel"))
             : (root.pending > 0
               ? strings.tn("import.button", root.pending).arg(root.pending).arg(root.bytes(root.card.newBytes))
               : strings.t("import.upToDate"))
@@ -348,6 +387,19 @@ Panel {
           fontFamily: root.fontFamily
           bordered: true
           onClicked: dji.importing ? dji.cancelImport() : dji.startImport()
+        }
+
+        Button {
+          width: parent.width
+          visible: root.card !== null && !dji.importing && root.importedCount > 0
+          iconText: "󰃢"
+          text: strings.tn("clean.button", root.importedCount).arg(root.importedCount)
+            .arg(root.bytes(root.card ? root.card.importedBytes : 0))
+          foreground: root.foreground
+          accent: root.accent
+          fontFamily: root.fontFamily
+          bordered: true
+          onClicked: root.cleanConfirmOpen = true
         }
 
         Text {
@@ -363,6 +415,28 @@ Panel {
             cursorShape: Qt.PointingHandCursor
             onClicked: Qt.openUrlExternally(Model.PROJECT_URL)
           }
+        }
+      }
+
+      // Deleting from the card always goes through this; Cancel is preselected.
+      ConfirmDialog {
+        id: cleanConfirm
+        anchors.fill: parent
+        z: 10
+        opened: root.cleanConfirmOpen
+        selectedIndex: 0
+        message: root.card
+          ? strings.tn("clean.confirm", root.importedCount).arg(root.importedCount)
+            .arg(root.bytes(root.card.importedBytes)).arg(Model.homeRelative(root.card.dest, dji.home))
+          : ""
+        confirmText: strings.t("clean.confirmButton")
+        foreground: root.foreground
+        fontFamily: root.fontFamily
+        onOpenedChanged: if (opened) selectedIndex = 0
+        onCanceled: root.cleanConfirmOpen = false
+        onConfirmed: {
+          root.cleanConfirmOpen = false
+          dji.startClean()
         }
       }
     }

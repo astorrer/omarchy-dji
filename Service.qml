@@ -26,7 +26,8 @@ Item {
   property var state: ({ cards: [], unmounted: [], error: "" })
   readonly property var card: state.cards.length > 0 ? state.cards[0] : null
   readonly property bool connected: card !== null || state.unmounted.length > 0
-  property bool importing: false
+  property bool importing: false   // true while any job (import or clean) runs
+  property string job: ""          // "import" | "clean"
   property bool cancelling: false
   property var progress: ({ bytes: 0, total: 0, index: 0, files: 0, name: "" })
   property var result: null
@@ -70,12 +71,16 @@ Item {
     Quickshell.execDetached(["notify-send", "-a", "DJI Import", "-i", "camera-video", String(title), String(body)])
   }
 
-  function startImport() {
+  function startImport() { start("import") }
+  function startClean() { start("clean") }
+
+  function start(mode) {
     if (importing || !card) return
     result = null
     progress = { bytes: 0, total: 0, index: 0, files: 0, name: "" }
+    job = mode
     importing = true
-    importProc.command = Model.helperArgs(helperPath, "import", {
+    importProc.command = Model.helperArgs(helperPath, mode, {
       dest: importPath, photos: includePhotos, proxies: includeProxies,
       move: deleteAfterImport, card: card.mount
     })
@@ -101,7 +106,8 @@ Item {
         index: progress.index, files: progress.files, name: progress.name }
     } else if (ev.event === "done") {
       result = {
-        kind: "done", dest: String(ev.dest || ""),
+        kind: "done", mode: ev.mode === "clean" ? "clean" : "import", dest: String(ev.dest || ""),
+        kept: Number(ev.kept) || 0,
         copied: Number(ev.copied) || 0, skipped: Number(ev.skipped) || 0, deleted: Number(ev.deleted) || 0,
         renamed: Number(ev.renamed) || 0,
         errors: Array.isArray(ev.errors) ? ev.errors.slice(0, 20).map(function(e) { return String(e).slice(0, 300) }) : []
@@ -155,13 +161,18 @@ Item {
     stdout: SplitParser { onRead: function(line) { root.handleEvent(line) } }
     onExited: function(exitCode) {
       if (!root.result) root.result = { kind: "error", message: root.t("import.stopped") }
-      if (root.result.kind === "done") {
+      if (root.result.kind === "done" && root.result.mode === "clean") {
+        root.notify(root.t("notify.cleanTitle"),
+          root.tn("result.removed", root.result.deleted).arg(root.result.deleted) +
+          (root.result.errors.length ? " · " + root.tn("result.errors", root.result.errors.length).arg(root.result.errors.length) : ""))
+      } else if (root.result.kind === "done") {
         root.notify(root.t("notify.doneTitle"),
           root.tn("result.copied", root.result.copied).arg(root.result.copied) +
           (root.result.errors.length ? " · " + root.tn("result.errors", root.result.errors.length).arg(root.result.errors.length) : ""))
       }
       root.importing = false
       root.cancelling = false
+      root.job = ""
       root.restartWatch()
     }
   }

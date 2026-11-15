@@ -4,7 +4,7 @@ const path = require("path")
 const assert = require("assert")
 
 const src = fs.readFileSync(path.join(__dirname, "..", "Model.js"), "utf8").replace(/^\.pragma library\s*/, "")
-const M = new Function(src + "\nreturn { PLUGIN_VERSION, PROJECT_URL, DEFAULT_DEST, validDest, displayName, formatBytes, percent, homeRelative, pickedTemplate, helperArgs, parseJson, normalizeState, count, newFiles, arrivals, mountSet }")()
+const M = new Function(src + "\nreturn { PLUGIN_VERSION, PROJECT_URL, DEFAULT_DEST, validDest, displayName, formatBytes, percent, homeRelative, pickedTemplate, helperArgs, parseJson, normalizeState, count, importedFiles, newFiles, arrivals, mountSet }")()
 
 let passed = 0
 function test(name, fn) { fn(); passed++ }
@@ -65,6 +65,8 @@ test("helperArgs", () => {
   assert.deepStrictEqual(M.helperArgs("/p/dji.py", "import", { dest: "/x", photos: false, proxies: true, move: true, card: "/run/media/u/SD" }),
     ["python3", "/p/dji.py", "import", "--json", "--dest", "/x", "--no-photos", "--proxies", "--move", "--card", "/run/media/u/SD"])
   assert.ok(!M.helperArgs("/p", "watch", { move: true, card: "/c" }).includes("--move"))
+  assert.deepStrictEqual(M.helperArgs("/p/dji.py", "clean", { dest: "/x", move: true, card: "/c" }),
+    ["python3", "/p/dji.py", "clean", "--json", "--dest", "/x", "--yes", "--card", "/c"])
 })
 
 test("parseJson", () => {
@@ -88,6 +90,8 @@ test("counts", () => {
   assert.strictEqual(M.count(card, "photo", "new"), 0)
   assert.strictEqual(M.newFiles(card), 4)
   assert.strictEqual(M.newFiles(null), 0)
+  assert.strictEqual(M.importedFiles({ importedFiles: 13 }), 13)
+  assert.strictEqual(M.importedFiles(null), 0)
 })
 
 test("arrivals only reports new mounts with new media", () => {

@@ -25,3 +25,6 @@
   appending `/{model}` (or swapping in `{model}` if the pick already is the
   camera's folder).
 - Option toggles dim while an import runs, not just lock.
+- Clean up card (panel button with a confirmation, or `dji.py clean`): removes
+  only files already imported, each hash-verified against its library copy.
+- Rescan button in the panel header.

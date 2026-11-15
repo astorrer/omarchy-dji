@@ -65,10 +65,9 @@ function helperArgs(helper, command, opts) {
   args.push("--dest", validDest(o.dest))
   if (o.photos === false) args.push("--no-photos")
   if (o.proxies === true) args.push("--proxies")
-  if (command === "import") {
-    if (o.move === true) args.push("--move")
-    if (o.card) args.push("--card", String(o.card))
-  }
+  if (command === "import" && o.move === true) args.push("--move")
+  if (command === "clean") args.push("--yes")
+  if ((command === "import" || command === "clean") && o.card) args.push("--card", String(o.card))
   return args
 }
 
@@ -98,6 +97,11 @@ function normalizeState(raw) {
 function count(card, kind, field) {
   var c = card && card.counts && card.counts[kind]
   var n = c ? Number(c[field]) : 0
+  return isFinite(n) && n > 0 ? Math.floor(n) : 0
+}
+
+function importedFiles(card) {
+  var n = card ? Number(card.importedFiles) : 0
   return isFinite(n) && n > 0 ? Math.floor(n) : 0
 }
 

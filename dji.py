@@ -280,6 +280,8 @@ def summarize(items):
         "newFiles": sum(c["new"] for c in counts.values()),
         "newBytes": new_bytes,
         "renamed": sum(1 for i in items if i["renamed"]),
+        "importedFiles": sum(1 for i in items if i["status"] == "imported"),
+        "importedBytes": sum(i["size"] for i in items if i["status"] == "imported"),
     }
 
 
@@ -353,13 +355,15 @@ def status(dest_template=DEFAULT_DEST, photos=True, proxies=False, mounts_text=N
 # ---------------------------------------------------------------- import
 
 
-def hash_file(path, drop_cache=False):
+def hash_file(path, drop_cache=False, on_bytes=None):
     h = hashlib.blake2b(digest_size=32)
     with open(path, "rb") as f:
         if drop_cache and hasattr(os, "posix_fadvise"):
             os.posix_fadvise(f.fileno(), 0, 0, os.POSIX_FADV_DONTNEED)
         while chunk := f.read(CHUNK):
             h.update(chunk)
+            if on_bytes:
+                on_bytes(len(chunk))
     return h.digest()
 
 
@@ -409,7 +413,10 @@ def free_space(path):
 
 
 def run_import(card_mount=None, dest_template=DEFAULT_DEST, photos=True, proxies=False, move=False,
-               dry_run=False, emit=print, mounts_text=None, sysroot="/sys", home=None):
+               dry_run=False, emit=print, mounts_text=None, sysroot="/sys", home=None, clean=False):
+    """Copy new media off the card (clean=False), or with clean=True copy
+    nothing and delete only card files whose imported copy hashes the same.
+    """
     cards = find_cards(mounts_text, sysroot)
     if card_mount:
         cards = [c for c in cards if os.path.realpath(c["mount"]) == os.path.realpath(card_mount)]
@@ -433,10 +440,17 @@ def run_import(card_mount=None, dest_template=DEFAULT_DEST, photos=True, proxies
         return 1
 
     items = scan(card["folders"], dest, photos, proxies)
-    todo = [i for i in items if i["status"] == "new" or (move and i["status"] == "imported")]
-    copy_bytes = sum(i["size"] for i in todo if i["status"] == "new")
-    emit({"event": "start", "model": model, "mount": card["mount"], "dest": str(dest), "files": len(todo),
-          "bytes": copy_bytes, "move": move, "dryRun": dry_run})
+    if clean:
+        move = True
+        todo = [i for i in items if i["status"] == "imported"]
+        work_bytes = sum(i["size"] for i in todo)  # progress tracks reading the card copies
+        copy_bytes = 0
+    else:
+        todo = [i for i in items if i["status"] == "new" or (move and i["status"] == "imported")]
+        work_bytes = copy_bytes = sum(i["size"] for i in todo if i["status"] == "new")
+    mode = "clean" if clean else "import"
+    emit({"event": "start", "mode": mode, "model": model, "mount": card["mount"], "dest": str(dest),
+          "files": len(todo), "bytes": work_bytes, "move": move, "dryRun": dry_run})
 
     if not dry_run and copy_bytes and free_space(dest) < copy_bytes:
         emit({"event": "error", "message": f"Not enough free space in {dest}", "needed": copy_bytes,
@@ -454,7 +468,7 @@ def run_import(card_mount=None, dest_template=DEFAULT_DEST, photos=True, proxies
         now = time.monotonic()
         if now - last >= PROGRESS_EVERY:
             last = now
-            emit({"event": "progress", "bytes": done_bytes, "total": copy_bytes})
+            emit({"event": "progress", "bytes": done_bytes, "total": work_bytes})
 
     for index, item in enumerate(todo, 1):
         emit({"event": "file", "index": index, "files": len(todo), "name": item["name"], "size": item["size"],
@@ -471,16 +485,17 @@ def run_import(card_mount=None, dest_template=DEFAULT_DEST, photos=True, proxies
                 digest = hash_file(item["found"], drop_cache=True)
                 skipped += 1
             if move:
-                if hash_file(item["src"]) != digest:
+                if hash_file(item["src"], on_bytes=on_bytes if clean else None) != digest:
                     raise OSError(f"{item['name']} changed on the card during import; left in place")
                 item["src"].unlink()
                 deleted += 1
         except OSError as exc:
             errors.append(f"{item['name']}: {exc.strerror or exc}")
     skipped += sum(1 for i in items if i["status"] == "imported") if not move else 0
-    emit({"event": "progress", "bytes": done_bytes, "total": copy_bytes})
-    emit({"event": "done", "dest": str(dest), "copied": copied, "skipped": skipped, "deleted": deleted,
-          "renamed": renamed, "errors": errors, "dryRun": dry_run})
+    kept = sum(1 for i in items if i["status"] == "new") if clean else 0
+    emit({"event": "progress", "bytes": done_bytes, "total": work_bytes})
+    emit({"event": "done", "mode": mode, "dest": str(dest), "copied": copied, "skipped": 0 if clean else skipped,
+          "deleted": deleted, "renamed": renamed, "kept": kept, "errors": errors, "dryRun": dry_run})
     return 1 if errors else 0
 
 
@@ -580,11 +595,13 @@ class HumanEmitter:
         kind = ev["event"]
         if kind == "start":
             mode = " (dry run)" if ev["dryRun"] else (" (move)" if ev["move"] else "")
+            if ev.get("mode") == "clean":
+                mode = " to check and remove from the card" + (" (dry run)" if ev["dryRun"] else "")
             self.total = ev["bytes"]
             self.dry = ev["dryRun"]
             self.line(f"{ev['model']}: {ev['files']} file(s), {human_bytes(ev['bytes'])} -> {ev['dest']}{mode}")
         elif kind == "file":
-            verb = "verify" if ev["action"] == "verify" else "copy"
+            verb = "check + remove" if ev["action"] == "verify" else "copy"
             self.prefix = f"{ev['index']}/{ev['files']} "
             note = f", as {ev['target']} because the name is taken" if ev.get("renamed") else ""
             self.line(f"  {verb} {ev['day']}/{ev['name']} ({human_bytes(ev['size'])}{note})")
@@ -595,6 +612,14 @@ class HumanEmitter:
             self.draw()
         elif kind == "done" and ev["dryRun"]:
             self.line("Dry run: nothing was changed.")
+        elif kind == "done" and ev.get("mode") == "clean":
+            self.draw()
+            if self.bar_shown:
+                self.out.write("\n")
+                self.bar_shown = False
+            self.line(f"Done: {ev['deleted']} removed from card, {ev['kept']} not yet imported kept")
+            for err in ev["errors"]:
+                self.line(f"  kept on card: {err}", err=True)
         elif kind == "done":
             self.draw()
             if self.bar_shown:
@@ -659,6 +684,25 @@ def watch(args, get_status=None, signature=device_signature, sleep=time.sleep, c
         sleep(args.interval)
 
 
+def confirm_clean(args, ask=input):
+    state = status(args.dest, args.photos, args.proxies)
+    cards = [c for c in state["cards"]
+             if not args.card or os.path.realpath(c["mount"]) == os.path.realpath(args.card)]
+    if len(cards) != 1:
+        return True  # run_import reports the problem
+    c = cards[0]
+    n = c.get("importedFiles", 0)
+    if not n:
+        return True  # nothing to delete; run_import says so
+    print(f"Delete {n} imported file(s) ({human_bytes(c.get('importedBytes', 0))}) from the card at {c['mount']}?")
+    print(f"Each one is hashed and compared with its copy in {c['dest']} first; "
+          f"{c.get('newFiles', 0)} file(s) not yet imported stay on the card.")
+    try:
+        return ask("Type 'yes' to continue: ").strip().lower() == "yes"
+    except EOFError:
+        return False
+
+
 def main(argv=None):
     parser = argparse.ArgumentParser(prog="dji.py", description=__doc__.split("\n\n")[0])
     sub = parser.add_subparsers(dest="command", required=True)
@@ -672,6 +716,11 @@ def main(argv=None):
     imp.add_argument("--card", help="card mount point (default: the one mounted DJI card)")
     imp.add_argument("--move", action="store_true", help="delete card files after a verified copy")
     imp.add_argument("-n", "--dry-run", action="store_true", help="show what would happen")
+    cln = sub.add_parser("clean", parents=[common],
+                         help="delete card files that are already imported (each verified by hash first)")
+    cln.add_argument("--card", help="card mount point (default: the one mounted DJI card)")
+    cln.add_argument("-y", "--yes", action="store_true", help="don't ask for confirmation")
+    cln.add_argument("-n", "--dry-run", action="store_true", help="show what would be deleted")
     w = sub.add_parser("watch", parents=[common], help="stream status as NDJSON when devices change")
     w.add_argument("--interval", type=float, default=2.0, help="device check period (seconds)")
     w.add_argument("--refresh", type=float, default=5.0, help="rescan period while a card is present")
@@ -695,8 +744,16 @@ def main(argv=None):
         raise Cancelled()
 
     signal.signal(signal.SIGTERM, cancel)
+    if args.command == "clean" and not args.dry_run and not args.yes:
+        if args.json or not sys.stdin.isatty():
+            emit({"event": "error", "message": "clean deletes files from the card; pass --yes to confirm"})
+            return 2
+        if not confirm_clean(args):
+            print("Nothing deleted.")
+            return 1
     try:
-        return run_import(args.card, args.dest, args.photos, args.proxies, args.move, args.dry_run, emit)
+        return run_import(args.card, args.dest, args.photos, args.proxies, getattr(args, "move", False),
+                          args.dry_run, emit, clean=args.command == "clean")
     except (Cancelled, KeyboardInterrupt):
         emit({"event": "cancelled"})
         return 130

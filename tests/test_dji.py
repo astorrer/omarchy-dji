@@ -366,6 +366,82 @@ class ProgressTests(unittest.TestCase):
         self.assertNotIn("━", out.getvalue())
 
 
+class CleanTests(unittest.TestCase):
+    """dji.py clean: delete only what is imported and verified; copy nothing."""
+
+    def setUp(self):
+        self.fx = Fixture()
+        self.events = []
+        self.day = self.fx.home / "Videos/OsmoAction4/2026-11-15"
+
+    def tearDown(self):
+        self.fx.close()
+
+    def run_clean(self, **kw):
+        return dji.run_import(emit=self.events.append, clean=True, **self.fx.kw(), **kw)
+
+    def done(self):
+        return [e for e in self.events if e["event"] == "done"][-1]
+
+    def imported(self, name, data):
+        self.day.mkdir(parents=True, exist_ok=True)
+        (self.day / name).write_bytes(data)
+        return self.fx.add(name, data)
+
+    def test_removes_verified_keeps_new_copies_nothing(self):
+        done_file = self.imported("DJI_20261115115741_0001_D.MP4", b"a" * 100)
+        new_file = self.fx.add("DJI_20261115120524_0002_D.MP4", b"b" * 100)
+        card = dji.status(**self.fx.kw())["cards"][0]
+        self.assertEqual((card["importedFiles"], card["importedBytes"]), (1, 100))
+        self.assertEqual(self.run_clean(), 0)
+        self.assertFalse(done_file.exists())
+        self.assertTrue(new_file.exists(), "files not yet imported must stay on the card")
+        self.assertFalse((self.day / new_file.name).exists(), "clean never copies")
+        self.assertEqual((self.done()["mode"], self.done()["deleted"], self.done()["kept"]), ("clean", 1, 1))
+        progress = [e for e in self.events if e["event"] == "progress"][-1]
+        self.assertEqual((progress["bytes"], progress["total"]), (100, 100))
+
+    def test_mismatched_copy_keeps_card_file(self):
+        v = self.fx.add("DJI_20261115115741_0001_D.MP4", b"a" * 100)
+        self.day.mkdir(parents=True)
+        (self.day / v.name).write_bytes(b"b" * 100)  # same name and size, different bytes
+        self.assertEqual(self.run_clean(), 1)
+        self.assertTrue(v.exists())
+        self.assertEqual(self.done()["deleted"], 0)
+        self.assertTrue(self.done()["errors"])
+
+    def test_dry_run_deletes_nothing(self):
+        v = self.imported("DJI_20261115115741_0001_D.MP4", b"a" * 100)
+        self.assertEqual(self.run_clean(dry_run=True), 0)
+        self.assertTrue(v.exists())
+
+    def test_cli_refuses_without_yes_when_not_interactive(self):
+        import contextlib
+        import io
+
+        buf = io.StringIO()
+        with contextlib.redirect_stdout(buf):
+            self.assertEqual(dji.main(["clean", "--json"]), 2)
+        self.assertIn("--yes", buf.getvalue())
+
+    def test_confirm_requires_typing_yes(self):
+        import argparse
+        import contextlib
+        import io
+
+        self.imported("DJI_20261115115741_0001_D.MP4", b"a" * 100)
+        original = dji.status
+        dji.status = lambda *a: original(*a, **self.fx.kw())
+        try:
+            args = argparse.Namespace(dest=dji.DEFAULT_DEST, photos=True, proxies=False, card=None)
+            with contextlib.redirect_stdout(io.StringIO()) as out:
+                self.assertFalse(dji.confirm_clean(args, ask=lambda prompt: "y"))
+                self.assertTrue(dji.confirm_clean(args, ask=lambda prompt: "yes"))
+            self.assertIn("Delete 1 imported file(s)", out.getvalue())
+        finally:
+            dji.status = original
+
+
 class LibraryTests(unittest.TestCase):
     """An import folder that already exists, possibly organized by hand."""
 

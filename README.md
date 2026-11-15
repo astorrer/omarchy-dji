@@ -48,6 +48,10 @@ library). Nothing runs as root, and the plugin makes no network calls.
    for the count. The icon takes the bar's active color while an import runs.
 2. Click the icon, check the destination, and press **Import**. You can
    cancel at any point. A cancelled copy never leaves a half-written file.
+3. Once everything is imported, **Clean up card** frees the card. It deletes
+   only files that are already in your library, and only after hashing both
+   copies and checking they match. Files that aren't imported yet are never
+   touched. A confirmation comes first, with Cancel preselected.
 
 | Setting | Default | |
 |---|---|---|
@@ -58,9 +62,10 @@ library). Nothing runs as root, and the plugin makes no network calls.
 | Notify on connect | on | |
 | Always show icon | off | By default the icon only shows while a DJI camera or card is present. |
 
-On the bar icon, a right-click rescans and a middle-click opens the import
-folder. With the panel open, <kbd>Enter</kbd> imports, <kbd>o</kbd> opens the
-folder, and <kbd>r</kbd> rescans.
+The 󰑐 button in the panel header rescans the card, and so does a right-click
+on the bar icon. A middle-click on the icon opens the import folder. With the
+panel open, <kbd>Enter</kbd> imports, <kbd>o</kbd> opens the folder, and
+<kbd>r</kbd> rescans.
 
 ## Existing folders
 
@@ -88,6 +93,8 @@ terminal, `import` shows a live progress bar with speed and time left:
 ./dji.py import --dry-run       # what would be copied where
 ./dji.py import                 # copy new media
 ./dji.py import --move          # copy, verify, then remove from the card
+./dji.py clean                  # remove already-imported files (asks first)
+./dji.py clean --dry-run        # what clean would remove
 ./dji.py import --dest '/mnt/nas/{model}' --no-photos --proxies
 ```
 
