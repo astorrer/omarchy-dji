@@ -44,6 +44,10 @@ SUFFIXED = re.compile(r"^(.+)-(\d+)(\.[^.]+)$")
 MODEL_BYTES = re.compile(rb"(Osmo[A-Za-z0-9]{1,24})")
 CHUNK = 4 * 1024 * 1024
 PROGRESS_EVERY = 0.25
+MAX_CARD_FILES = 20_000   # per scan; a real card holds a few thousand at most
+MAX_MP4_BOXES = 10_000    # top-level boxes walked looking for moov
+UDISKSCTL = "/usr/bin/udisksctl"
+SAFE_ENV = {"PATH": "/usr/bin:/bin", "LANG": "C.UTF-8"}
 
 
 class Cancelled(Exception):
@@ -67,9 +71,22 @@ def parse_mounts(text):
 def dji_folders(mount):
     dcim = Path(mount) / "DCIM"
     try:
-        return sorted(p for p in dcim.iterdir() if p.is_dir() and p.name.upper().startswith("DJI_"))
+        if dcim.is_symlink():
+            return []
+        return sorted(p for p in dcim.iterdir()
+                      if p.name.upper().startswith("DJI_") and not p.is_symlink() and p.is_dir())[:999]
     except OSError:
         return []
+
+
+def clean_label(text, limit=48):
+    """Text a card or USB device supplied, reduced to something safe to display.
+
+    Drops control characters and the markup characters <, >, &, quotes, so a
+    crafted volume label or USB product string can't become rich text anywhere.
+    """
+    text = "".join(ch for ch in str(text or "") if ch.isprintable() and ch not in "<>&\"'`")
+    return text.strip()[:limit]
 
 
 def read_text(path):
@@ -89,7 +106,7 @@ def usb_cameras(sysroot="/sys"):
         return out
     for dev in entries:
         if read_text(dev / "idVendor") == DJI_VENDOR:
-            out.append({"product": read_text(dev / "product") or "DJI", "path": str(dev.resolve())})
+            out.append({"product": clean_label(read_text(dev / "product")) or "DJI", "path": str(dev.resolve())})
     return out
 
 
@@ -102,7 +119,7 @@ def usb_product_for_device(device, sysroot="/sys"):
         return ""
     for parent in [node, *node.parents]:
         if (parent / "idVendor").exists():
-            return read_text(parent / "product") if read_text(parent / "idVendor") == DJI_VENDOR else ""
+            return clean_label(read_text(parent / "product")) if read_text(parent / "idVendor") == DJI_VENDOR else ""
     return ""
 
 
@@ -112,7 +129,9 @@ def mp4_moov(path, limit=32 * 1024 * 1024):
         with open(path, "rb") as f:
             size = os.fstat(f.fileno()).st_size
             pos = 0
-            while pos + 8 <= size:
+            for _ in range(MAX_MP4_BOXES):
+                if pos + 8 > size:
+                    break
                 f.seek(pos)
                 header = f.read(16)
                 box_size = int.from_bytes(header[:4], "big")
@@ -245,6 +264,7 @@ def scan(card_folders, dest, photos=True, proxies=False, index=None):
     """
     index = library_index(dest) if index is None else index
     claimed = set()
+    seen = 0
     want = {"video"} | ({"photo"} if photos else set()) | ({"proxy"} if proxies else set())
     items = []
     for folder in card_folders:
@@ -253,9 +273,12 @@ def scan(card_folders, dest, photos=True, proxies=False, index=None):
         except OSError:
             continue
         for src in entries:
+            seen += 1
+            if seen > MAX_CARD_FILES:
+                return items
             kind = KINDS.get(src.suffix.lower())
             try:
-                if kind not in want or not src.is_file():
+                if kind not in want or src.is_symlink() or not src.is_file():
                     continue
                 size = src.stat().st_size
             except OSError:  # card pulled mid-scan
@@ -288,7 +311,9 @@ def proxy_leftovers(card_folders, items, index, removing=()):
             entries = list(folder.iterdir())
         except OSError:
             continue
-        for f in entries:
+        for f in entries[:MAX_CARD_FILES]:
+            if f.is_symlink():
+                continue
             kind = KINDS.get(f.suffix.lower())
             if kind == "video" and f not in removing:
                 clips_on_card.add((f.parent, f.stem.lower()))
@@ -316,12 +341,25 @@ def summarize(items):
     }
 
 
+def is_removable(device, sysroot="/sys"):
+    """True for SD cards, USB card readers, and cameras; False for fixed disks."""
+    disk = os.path.basename(parent_disk(device, sysroot))
+    node = Path(sysroot) / "class/block" / disk
+    if read_text(node / "removable") == "1":
+        return True
+    try:
+        path = str(node.resolve())
+    except OSError:
+        return False
+    return "/usb" in path or "/mmc" in path or disk.startswith("mmcblk")
+
+
 def find_cards(mounts_text=None, sysroot="/sys"):
     if mounts_text is None:
         mounts_text = read_text("/proc/self/mounts")
     cards = []
     for device, mount, fstype in parse_mounts(mounts_text):
-        if fstype not in CARD_FSTYPES:
+        if fstype not in CARD_FSTYPES or not device.startswith("/dev/") or not is_removable(device, sysroot):
             continue
         folders = dji_folders(mount)
         if folders:
@@ -365,7 +403,7 @@ def status(dest_template=DEFAULT_DEST, photos=True, proxies=False, mounts_text=N
     for card in find_cards(mounts_text, sysroot):
         model = card_model(card)
         folder = folder_name(model)
-        entry = {"mount": card["mount"], "label": os.path.basename(card["mount"]), "device": card["device"],
+        entry = {"mount": card["mount"], "label": clean_label(os.path.basename(card["mount"])), "device": card["device"],
                  "model": model, "folder": folder, "connection": "usb" if card["usbProduct"] else "card"}
         try:
             dest = expand_dest(dest_template, folder, home)
@@ -390,9 +428,14 @@ def status(dest_template=DEFAULT_DEST, photos=True, proxies=False, mounts_text=N
 # ---------------------------------------------------------------- import
 
 
+def open_nofollow(path):
+    """Open a file for reading, refusing a symlink."""
+    return os.fdopen(os.open(path, os.O_RDONLY | os.O_NOFOLLOW | os.O_CLOEXEC), "rb")
+
+
 def hash_file(path, drop_cache=False, on_bytes=None):
     h = hashlib.blake2b(digest_size=32)
-    with open(path, "rb") as f:
+    with open_nofollow(path) as f:
         if drop_cache and hasattr(os, "posix_fadvise"):
             os.posix_fadvise(f.fileno(), 0, 0, os.POSIX_FADV_DONTNEED)
         while chunk := f.read(CHUNK):
@@ -403,12 +446,22 @@ def hash_file(path, drop_cache=False, on_bytes=None):
 
 
 def copy_file(src, target, on_bytes, verify):
-    """Copy src to target via a hidden .part file; return the source hash."""
+    """Copy src to target via a hidden .part file; return the source hash.
+
+    The date folder must be a real folder, not a symlink, and the .part file
+    is created fresh with O_EXCL | O_NOFOLLOW, so a symlink planted in a shared
+    library can't redirect the write.
+    """
     target.parent.mkdir(parents=True, exist_ok=True)
+    if target.parent.is_symlink():
+        raise OSError(f"{target.parent.name} is a symlink in the library; skipped")
     part = target.parent / f".{target.name}.part"
+    if os.path.lexists(part):
+        os.unlink(part)  # a leftover from an interrupted run (unlink never follows a symlink)
     h = hashlib.blake2b(digest_size=32)
+    fd = os.open(part, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW | os.O_CLOEXEC, 0o644)
     try:
-        with open(src, "rb") as fi, open(part, "wb") as fo:
+        with os.fdopen(fd, "wb") as fo, open_nofollow(src) as fi:
             while chunk := fi.read(CHUNK):
                 h.update(chunk)
                 fo.write(chunk)
@@ -567,14 +620,15 @@ def parent_disk(device, sysroot="/sys"):
 def udisks(*args, run=subprocess.run):
     """Run udisksctl without prompting; return (ok, message)."""
     try:
-        proc = run(["udisksctl", *args, "--no-user-interaction"], capture_output=True, text=True, timeout=60)
+        proc = run([UDISKSCTL, *args, "--no-user-interaction"], capture_output=True, text=True, timeout=60,
+                   env=SAFE_ENV)
     except FileNotFoundError:
         return False, "udisksctl is not installed"
     except subprocess.TimeoutExpired:
         return False, "udisksctl timed out"
     text = (proc.stderr or proc.stdout or "").strip()
     text = re.sub(r"^Error \w+ [^:]*: ", "", text.splitlines()[-1] if text else "")
-    return proc.returncode == 0, text
+    return proc.returncode == 0, clean_label(text, 300)
 
 
 def eject(card_mount=None, emit=print, mounts_text=None, sysroot="/sys", run=subprocess.run, sync=os.sync):

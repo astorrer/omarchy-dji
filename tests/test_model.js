@@ -4,7 +4,7 @@ const path = require("path")
 const assert = require("assert")
 
 const src = fs.readFileSync(path.join(__dirname, "..", "Model.js"), "utf8").replace(/^\.pragma library\s*/, "")
-const M = new Function(src + "\nreturn { PLUGIN_VERSION, PROJECT_URL, DEFAULT_DEST, validDest, displayName, formatBytes, percent, homeRelative, pickedTemplate, helperArgs, parseJson, normalizeState, count, importedFiles, cleanProxies, newFiles, arrivals, mountSet }")()
+const M = new Function(src + "\nreturn { PLUGIN_VERSION, PROJECT_URL, DEFAULT_DEST, validDest, displayName, formatBytes, percent, homeRelative, pickedTemplate, helperArgs, helperEnv, plainText, openTarget, parseJson, normalizeState, count, importedFiles, cleanProxies, newFiles, arrivals, mountSet }")()
 
 let passed = 0
 function test(name, fn) { fn(); passed++ }
@@ -61,14 +61,36 @@ test("pickedTemplate recognizes the camera folder itself", () => {
 
 test("helperArgs", () => {
   assert.deepStrictEqual(M.helperArgs("/p/dji.py", "watch", { dest: "", photos: true, proxies: false }),
-    ["python3", "/p/dji.py", "watch", "--dest", "~/Videos/{model}"])
+    ["/usr/bin/python3", "-I", "/p/dji.py", "watch", "--dest", "~/Videos/{model}"])
   assert.deepStrictEqual(M.helperArgs("/p/dji.py", "import", { dest: "/x", photos: false, proxies: true, move: true, card: "/run/media/u/SD" }),
-    ["python3", "/p/dji.py", "import", "--json", "--dest", "/x", "--no-photos", "--proxies", "--move", "--card", "/run/media/u/SD"])
+    ["/usr/bin/python3", "-I", "/p/dji.py", "import", "--json", "--dest", "/x", "--no-photos", "--proxies", "--move", "--card", "/run/media/u/SD"])
   assert.ok(!M.helperArgs("/p", "watch", { move: true, card: "/c" }).includes("--move"))
   assert.deepStrictEqual(M.helperArgs("/p/dji.py", "clean", { dest: "/x", move: true, card: "/c" }),
-    ["python3", "/p/dji.py", "clean", "--json", "--dest", "/x", "--yes", "--card", "/c"])
+    ["/usr/bin/python3", "-I", "/p/dji.py", "clean", "--json", "--dest", "/x", "--yes", "--card", "/c"])
   assert.ok(M.helperArgs("/p/dji.py", "eject", { card: "/c", move: true }).includes("--card"))
   assert.ok(!M.helperArgs("/p/dji.py", "eject", { card: "/c", move: true }).includes("--move"))
+})
+
+test("helpers run isolated with a fixed environment", () => {
+  assert.deepStrictEqual(M.helperEnv("/home/a"), { HOME: "/home/a", LANG: "C.UTF-8", PATH: "/usr/bin:/bin" })
+  const args = M.helperArgs("/p/dji.py", "watch", {})
+  assert.strictEqual(args[0], "/usr/bin/python3")
+  assert.strictEqual(args[1], "-I")
+})
+
+test("plainText neutralizes markup-shaped input", () => {
+  assert.strictEqual(M.plainText('<img src="https://example.invalid/t">Action&4'), "img src=https://example.invalid/tAction4")
+  assert.strictEqual(M.plainText("a\u0000b\u001bc"), "abc")
+  assert.strictEqual(M.plainText("x".repeat(500)).length, 200)
+  assert.strictEqual(M.plainText(null), "")
+})
+
+test("openTarget opens the import folder or its existing parent", () => {
+  assert.strictEqual(M.openTarget({ dest: "/h/Videos/OsmoAction4", destExists: true }, null), "/h/Videos/OsmoAction4")
+  assert.strictEqual(M.openTarget({ dest: "/h/Videos/OsmoAction4", destExists: false }, null), "/h/Videos")
+  assert.strictEqual(M.openTarget({ dest: "/x", destExists: false }, null), "/")
+  assert.strictEqual(M.openTarget(null, { dest: "/r" }), "/r")
+  assert.strictEqual(M.openTarget(null, null), "")
 })
 
 test("parseJson", () => {

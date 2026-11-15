@@ -1,5 +1,22 @@
 # Changelog
 
+## 0.1.1 — 2026-11-15
+
+Security hardening from a pre-marketplace audit:
+
+- Helpers run as `/usr/bin/python3 -I` with a cleared environment (`HOME`,
+  `LANG`, fixed `PATH`); `udisksctl`, `notify-send`, `xdg-open`, and the folder
+  picker are called by absolute path, and opening a folder no longer goes
+  through `sh -c`. A planted `python3` earlier on `PATH` can't run.
+- Only removable devices (SD, USB card readers, cameras) count as cards, so
+  clean-up and eject can never act on a fixed disk.
+- Card-supplied text (volume label, USB product name) is stripped of control
+  and markup characters and capped; notification text is neutralized too.
+- Symlinks on the card are skipped; `.part` files are created with
+  `O_EXCL | O_NOFOLLOW`; symlinked date folders are refused.
+- MP4 box walking and card scans are bounded.
+- The clean-up confirmation names the volume it will remove files from.
+
 ## 0.1.0 — 2026-11-15
 
 - First release: bar widget and `dji.py` CLI that detect DJI Osmo cameras

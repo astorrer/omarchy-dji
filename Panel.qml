@@ -30,9 +30,9 @@ Panel {
     if (!card) return ""
     var where = Model.homeRelative(card.dest, dji.home)
     if (importedCount === 0)
-      return strings.tn("clean.confirmOnlyProxies", proxyCount).arg(proxyCount).arg(where)
+      return strings.tn("clean.confirmOnlyProxies", proxyCount).arg(proxyCount).arg(where).arg(card.label)
     var text = strings.tn("clean.confirm", importedCount).arg(importedCount)
-      .arg(bytes(card.importedBytes)).arg(where)
+      .arg(bytes(card.importedBytes)).arg(where).arg(card.label)
     if (proxyCount > 0) text += "\n\n" + strings.tn("clean.confirmProxies", proxyCount).arg(proxyCount)
     return text
   }

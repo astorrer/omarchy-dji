@@ -1,9 +1,12 @@
 .pragma library
 
-var PLUGIN_VERSION = "0.1.0"
+var PLUGIN_VERSION = "0.1.1"
 var PROJECT_URL = "https://github.com/astorrer/omarchy-dji"
 var DEFAULT_DEST = "~/Videos/{model}"
-var HELPER_INTERPRETER = "python3"
+// Helpers run by absolute path, isolated (-I ignores PYTHON* variables and the
+// user site dir), with a cleared environment; see helperEnv.
+var HELPER_INTERPRETER = "/usr/bin/python3"
+var SAFE_PATH = "/usr/bin:/bin"
 
 function validDest(value) {
   var text = String(value === undefined || value === null ? "" : value).trim()
@@ -60,7 +63,7 @@ function pickedTemplate(path, home, folder) {
 
 function helperArgs(helper, command, opts) {
   var o = opts || {}
-  var args = [HELPER_INTERPRETER, helper, command]
+  var args = [HELPER_INTERPRETER, "-I", helper, command]
   if (command !== "watch") args.push("--json")
   args.push("--dest", validDest(o.dest))
   if (o.photos === false) args.push("--no-photos")
@@ -69,6 +72,28 @@ function helperArgs(helper, command, opts) {
   if (command === "clean") args.push("--yes")
   if ((command === "import" || command === "clean" || command === "eject") && o.card) args.push("--card", String(o.card))
   return args
+}
+
+function helperEnv(home) {
+  return { HOME: String(home || ""), LANG: "C.UTF-8", PATH: SAFE_PATH }
+}
+
+// Text for sinks that may render markup (the notification body is StyledText):
+// drop control characters and markup characters, and cap the length.
+function plainText(value, limit) {
+  var text = String(value === undefined || value === null ? "" : value)
+    .replace(/[\u0000-\u001f\u007f<>&"'`]/g, "")
+  return text.slice(0, limit || 200)
+}
+
+// The folder to open: the import folder once it exists, else its parent.
+function openTarget(card, result) {
+  if (card && card.dest) {
+    if (card.destExists === true) return String(card.dest)
+    var parent = String(card.dest).replace(/\/+$/, "").replace(/\/[^\/]*$/, "")
+    return parent === "" ? "/" : parent
+  }
+  return result && result.dest ? String(result.dest) : ""
 }
 
 function parseJson(line) {

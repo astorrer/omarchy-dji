@@ -120,6 +120,32 @@ Detection:
 Each date folder comes from the timestamp in the DJI filename, which is the
 camera's local time. Copies keep the original modification time.
 
+## Security
+
+- **Nothing leaves your machine.** The plugin makes no network calls and
+  stores no credentials. It never runs anything as root. Its only settings are
+  in `~/.config/omarchy/shell.json`.
+- **Fixed commands.** Helpers run as `/usr/bin/python3 -I` with a cleared
+  environment (`HOME`, `LANG`, `PATH=/usr/bin:/bin`), and every other command
+  (`udisksctl`, `notify-send`, `xdg-open`, the folder picker) is called by
+  absolute path. A program planted earlier on your `PATH` is never run.
+- **Only removable devices.** A volume counts as a card only if it's an SD
+  card, a USB card reader, or a camera. Clean up and eject never touch a fixed
+  disk.
+- **The card is untrusted input.** Its volume label, filenames, and metadata
+  and the USB product name are stripped of control and markup characters and
+  shortened before they're shown anywhere. Every file and folder on the card
+  that's a symlink is skipped. Metadata parsing and folder scans have hard
+  limits.
+- **Writes can't be redirected.** Temp files are created with
+  `O_EXCL | O_NOFOLLOW`, date folders that are symlinks are refused, and the
+  final rename never replaces an existing file. That holds even in a library
+  other people can write to, like a shared NAS.
+- **Deleting is always verified.** A card file is only removed after its
+  library copy has been read back and its hash matches.
+
+Found a problem? Please [open an issue](https://github.com/astorrer/omarchy-dji/issues).
+
 ## Development
 
 ```sh

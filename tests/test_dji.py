@@ -507,6 +507,7 @@ class EjectTests(unittest.TestCase):
         self.fx = Fixture()
         self.fx.add("DJI_20261115115741_0001_D.MP4")
         self.calls = []
+        self.envs = []
         self.events = []
         self.synced = []
 
@@ -518,6 +519,7 @@ class EjectTests(unittest.TestCase):
 
         def run(cmd, **kw):
             self.calls.append(cmd)
+            self.envs.append(kw.get("env"))
             code, err = results[len(self.calls) - 1]
             return subprocess.CompletedProcess(cmd, code, "", err)
         return run
@@ -529,8 +531,8 @@ class EjectTests(unittest.TestCase):
     def test_syncs_unmounts_then_powers_off(self):
         self.assertEqual(self.eject([(0, ""), (0, "")]), 0)
         self.assertEqual(self.synced, [True])
-        self.assertEqual(self.calls[0], ["udisksctl", "unmount", "-b", "/dev/sda", "--no-user-interaction"])
-        self.assertEqual(self.calls[1], ["udisksctl", "power-off", "-b", "/dev/sda", "--no-user-interaction"])
+        self.assertEqual(self.calls[0], ["/usr/bin/udisksctl", "unmount", "-b", "/dev/sda", "--no-user-interaction"])
+        self.assertEqual(self.calls[1], ["/usr/bin/udisksctl", "power-off", "-b", "/dev/sda", "--no-user-interaction"])
         self.assertEqual(self.events[-1]["event"], "ejected")
         self.assertTrue(self.events[-1]["poweredOff"])
 
@@ -715,6 +717,159 @@ class ModelCacheTests(unittest.TestCase):
             self.assertEqual(len(calls), 1)
         finally:
             fx.close()
+
+
+class SecurityTests(unittest.TestCase):
+    """Regression tests for the pre-marketplace security audit."""
+
+    def setUp(self):
+        self.fx = Fixture()
+        self.events = []
+
+    def tearDown(self):
+        self.fx.close()
+
+    def lib_day(self):
+        return self.fx.home / "Videos/OsmoAction4/2026-11-15"
+
+    # -- only removable devices count as cards
+
+    def fixed_disk(self, removable="0"):
+        disk = self.fx.sys / "devices/pci0/nvme/nvme0/nvme0n1"
+        disk.mkdir(parents=True)
+        (disk / "removable").write_text(removable)
+        (self.fx.sys / "class/block/nvme0n1").symlink_to(disk)
+        return self.fx.mounts.replace("/dev/sda ", "/dev/nvme0n1 ")
+
+    def test_fixed_disk_is_never_a_card(self):
+        self.fx.add("DJI_20261115115741_0001_D.MP4")
+        mounts = self.fixed_disk()
+        self.assertEqual(dji.find_cards(mounts, str(self.fx.sys)), [])
+        self.assertEqual(dji.eject(emit=self.events.append, mounts_text=mounts, sysroot=str(self.fx.sys),
+                                   run=lambda *a, **k: self.fail("must not run udisksctl")), 1)
+
+    def test_removable_flag_counts(self):
+        self.fx.add("DJI_20261115115741_0001_D.MP4")
+        self.assertEqual(len(dji.find_cards(self.fixed_disk("1"), str(self.fx.sys))), 1)
+
+    def test_non_dev_sources_are_ignored(self):
+        self.fx.add("DJI_20261115115741_0001_D.MP4")
+        mounts = self.fx.mounts.replace("/dev/sda ", "nas:/share ")
+        self.assertEqual(dji.find_cards(mounts, str(self.fx.sys)), [])
+
+    # -- card-supplied text
+
+    def test_markup_in_usb_product_and_label_is_neutralized(self):
+        fx = Fixture(usb_product='<img src="https://example.invalid/t">Osmo&Action4')
+        try:
+            fx.add("DJI_20261115115741_0001_D.MP4")
+            evil = fx.mount.parent / "<i>SD&Card\"x"
+            fx.mount.rename(evil)
+            fx.mounts = fx.mounts.replace(str(fx.mount).replace(" ", "\\040"), str(evil))
+            card = dji.status(**fx.kw())["cards"][0]
+            for field in ("model", "label", "folder"):
+                self.assertFalse(set(card[field]) & set("<>&\"'"), (field, card[field]))
+            self.assertEqual(card["label"], "iSDCardx")
+        finally:
+            fx.close()
+
+    def test_unmounted_product_is_neutralized(self):
+        fx = Fixture(usb_product="Osmo\x1b[31m<script>")
+        try:
+            state = dji.status(mounts_text="", sysroot=str(fx.sys), home=str(fx.home))
+            self.assertEqual(state["unmounted"], ["Osmo[31mscript"])
+        finally:
+            fx.close()
+
+    def test_clean_label_caps_length(self):
+        self.assertEqual(len(dji.clean_label("A" * 500)), 48)
+
+    # -- symlinks
+
+    def test_symlink_on_card_is_ignored(self):
+        secret = Path(self.fx.tmp.name) / "secret.txt"
+        secret.write_text("private")
+        (self.fx.folder / "DJI_20261115115741_0001_D.MP4").symlink_to(secret)
+        card = dji.status(**self.fx.kw())["cards"][0]
+        self.assertEqual(card["newFiles"], 0)
+        dji.run_import(emit=self.events.append, move=True, **self.fx.kw())
+        self.assertFalse(self.lib_day().exists())
+        self.assertEqual(secret.read_text(), "private")
+
+    def test_symlinked_dji_folder_is_ignored(self):
+        elsewhere = Path(self.fx.tmp.name) / "elsewhere"
+        elsewhere.mkdir()
+        (elsewhere / "DJI_20261115115741_0001_D.MP4").write_bytes(b"x")
+        (self.fx.mount / "DCIM/DJI_002").symlink_to(elsewhere)
+        self.assertEqual(dji.dji_folders(self.fx.mount), [self.fx.folder])
+
+    def test_planted_part_symlink_cannot_redirect_the_write(self):
+        v = self.fx.add("DJI_20261115115741_0001_D.MP4", b"video" * 20)
+        victim = Path(self.fx.tmp.name) / "victim.txt"
+        victim.write_text("keep me")
+        day = self.lib_day()
+        day.mkdir(parents=True)
+        (day / f".{v.name}.part").symlink_to(victim)
+        self.assertEqual(dji.run_import(emit=self.events.append, **self.fx.kw()), 0)
+        self.assertEqual(victim.read_text(), "keep me")
+        self.assertEqual((day / v.name).read_bytes(), b"video" * 20)
+
+    def test_symlinked_date_folder_is_refused(self):
+        v = self.fx.add("DJI_20261115115741_0001_D.MP4")
+        outside = Path(self.fx.tmp.name) / "outside"
+        outside.mkdir()
+        self.lib_day().parent.mkdir(parents=True)
+        self.lib_day().symlink_to(outside)
+        self.assertEqual(dji.run_import(emit=self.events.append, move=True, **self.fx.kw()), 1)
+        self.assertEqual(list(outside.iterdir()), [])
+        self.assertTrue(v.exists(), "a refused copy must never delete the original")
+
+    def test_open_nofollow_refuses_symlinks(self):
+        real = Path(self.fx.tmp.name) / "real"
+        real.write_bytes(b"x")
+        link = Path(self.fx.tmp.name) / "link"
+        link.symlink_to(real)
+        with self.assertRaises(OSError):
+            dji.hash_file(link)
+
+    # -- bounded parsing
+
+    def test_mp4_box_walk_is_bounded(self):
+        import time
+
+        with tempfile.NamedTemporaryFile(suffix=".MP4", delete=False) as f:
+            f.write((b"\0\0\0\x08free") * 200_000)  # 200k empty boxes, no moov
+        try:
+            start = time.monotonic()
+            self.assertEqual(dji.mp4_moov(f.name), b"")
+            self.assertLess(time.monotonic() - start, 1.0)
+        finally:
+            os.unlink(f.name)
+
+    def test_card_scan_is_bounded(self):
+        original = dji.MAX_CARD_FILES
+        dji.MAX_CARD_FILES = 5
+        try:
+            for i in range(10):
+                self.fx.add(f"DJI_202611151157{i:02d}_00{i:02d}_D.MP4")
+            self.assertLessEqual(len(dji.scan([self.fx.folder], self.fx.home / "lib")), 5)
+        finally:
+            dji.MAX_CARD_FILES = original
+
+    # -- subprocesses
+
+    def test_udisksctl_runs_by_absolute_path_with_fixed_env(self):
+        import subprocess
+
+        seen = {}
+
+        def run(cmd, **kw):
+            seen.update(cmd=cmd, env=kw.get("env"))
+            return subprocess.CompletedProcess(cmd, 0, "", "")
+
+        dji.udisks("unmount", "-b", "/dev/sda", run=run)
+        self.assertEqual(seen["cmd"][0], "/usr/bin/udisksctl")
+        self.assertEqual(seen["env"], {"PATH": "/usr/bin:/bin", "LANG": "C.UTF-8"})
 
 
 class Mp4Tests(unittest.TestCase):

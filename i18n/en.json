@@ -27,7 +27,10 @@
   "opt.proxiesHelp": "Low-res copies the camera records; handy as editing proxies.",
   "opt.move": "Remove from card after import",
   "opt.moveHelp": "Each file is deleted only after its copy is re-read and verified.",
-  "import.button": { "one": "Import %1 file (%2)", "other": "Import %1 files (%2)" },
+  "import.button": {
+    "one": "Import %1 file (%2)",
+    "other": "Import %1 files (%2)"
+  },
   "import.upToDate": "Everything is already imported",
   "import.progress": "File %1 of %2 · %3 of %4",
   "import.cancel": "Cancel import",
@@ -41,26 +44,68 @@
   "notify.ejectTitle": "DJI card ejected",
   "notify.ejectBody": "It's safe to unplug it.",
   "tooltip.cleaning": "Cleaning up card · %1%",
-  "clean.button": { "one": "Clean up card: %1 imported file (%2)", "other": "Clean up card: %1 imported files (%2)" },
-  "clean.confirm": { "one": "Remove %1 imported file (%2) from the card?\n\nIt is first checked byte for byte against its copy in %3 and stays on the card if they differ. Files that are not imported yet are never touched.", "other": "Remove %1 imported files (%2) from the card?\n\nEach is first checked byte for byte against its copy in %3 and stays on the card if they differ. Files that are not imported yet are never touched." },
-  "clean.buttonProxies": { "one": "Clean up card: %1 leftover LRF proxy", "other": "Clean up card: %1 leftover LRF proxies" },
-  "clean.confirmProxies": { "one": "Its %1 LRF proxy (a low-res copy the camera makes) is removed too.", "other": "Their %1 LRF proxies (low-res copies the camera makes) are removed too." },
-  "clean.confirmOnlyProxies": { "one": "Remove %1 leftover LRF proxy from the card?\n\nIt is a low-res copy the camera made of a clip that is already in %2.", "other": "Remove %1 leftover LRF proxies from the card?\n\nThey are low-res copies the camera made of clips that are already in %2." },
+  "clean.button": {
+    "one": "Clean up card: %1 imported file (%2)",
+    "other": "Clean up card: %1 imported files (%2)"
+  },
+  "clean.confirm": {
+    "one": "Remove %1 imported file (%2) from %4?\n\nIt is first checked byte for byte against its copy in %3 and stays on the card if they differ. Files that are not imported yet are never touched.",
+    "other": "Remove %1 imported files (%2) from %4?\n\nEach is first checked byte for byte against its copy in %3 and stays on the card if they differ. Files that are not imported yet are never touched."
+  },
+  "clean.buttonProxies": {
+    "one": "Clean up card: %1 leftover LRF proxy",
+    "other": "Clean up card: %1 leftover LRF proxies"
+  },
+  "clean.confirmProxies": {
+    "one": "Its %1 LRF proxy (a low-res copy the camera makes) is removed too.",
+    "other": "Their %1 LRF proxies (low-res copies the camera makes) are removed too."
+  },
+  "clean.confirmOnlyProxies": {
+    "one": "Remove %1 leftover LRF proxy from %3?\n\nIt is a low-res copy the camera made of a clip that is already in %2.",
+    "other": "Remove %1 leftover LRF proxies from %3?\n\nThey are low-res copies the camera made of clips that are already in %2."
+  },
   "clean.confirmButton": "Remove",
   "clean.progress": "Checking file %1 of %2 · %3 of %4",
   "clean.cancel": "Cancel clean-up",
-  "result.removed": { "one": "Removed %1 file from the card", "other": "Removed %1 files from the card" },
-  "result.proxies": { "one": "+%1 LRF proxy", "other": "+%1 LRF proxies" },
-  "result.kept": { "one": "%1 not yet imported, kept", "other": "%1 not yet imported, kept" },
+  "result.removed": {
+    "one": "Removed %1 file from the card",
+    "other": "Removed %1 files from the card"
+  },
+  "result.proxies": {
+    "one": "+%1 LRF proxy",
+    "other": "+%1 LRF proxies"
+  },
+  "result.kept": {
+    "one": "%1 not yet imported, kept",
+    "other": "%1 not yet imported, kept"
+  },
   "notify.cleanTitle": "DJI card cleaned up",
-  "result.copied": { "one": "Imported %1 file", "other": "Imported %1 files" },
-  "result.renamed": { "one": "%1 renamed (name was taken)", "other": "%1 renamed (names were taken)" },
-  "result.skipped": { "one": "%1 already there", "other": "%1 already there" },
-  "result.deleted": { "one": "%1 removed from card", "other": "%1 removed from card" },
-  "result.errors": { "one": "%1 error", "other": "%1 errors" },
+  "result.copied": {
+    "one": "Imported %1 file",
+    "other": "Imported %1 files"
+  },
+  "result.renamed": {
+    "one": "%1 renamed (name was taken)",
+    "other": "%1 renamed (names were taken)"
+  },
+  "result.skipped": {
+    "one": "%1 already there",
+    "other": "%1 already there"
+  },
+  "result.deleted": {
+    "one": "%1 removed from card",
+    "other": "%1 removed from card"
+  },
+  "result.errors": {
+    "one": "%1 error",
+    "other": "%1 errors"
+  },
   "result.cancelled": "Import cancelled; nothing partial was left behind.",
   "result.failed": "Import failed: %1",
   "notify.connected": "%1 connected",
-  "notify.ready": { "one": "%1 new file ready to import (%2)", "other": "%1 new files ready to import (%2)" },
+  "notify.ready": {
+    "one": "%1 new file ready to import (%2)",
+    "other": "%1 new files ready to import (%2)"
+  },
   "notify.doneTitle": "DJI import finished"
 }

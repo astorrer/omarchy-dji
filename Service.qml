@@ -19,6 +19,7 @@ Item {
   readonly property bool alwaysShowIcon: setting("alwaysShowIcon", false) === true
   readonly property string home: Quickshell.env("HOME")
   readonly property string helperPath: decodeURIComponent(Qt.resolvedUrl("dji.py").toString().replace(/^file:\/\//, ""))
+  readonly property var helperEnv: Model.helperEnv(home)
   readonly property var watchArgs: Model.helperArgs(helperPath, "watch", {
     dest: importPath, photos: includePhotos, proxies: includeProxies
   })
@@ -69,7 +70,8 @@ Item {
   }
 
   function notify(title, body) {
-    Quickshell.execDetached(["notify-send", "-a", "DJI Import", "-i", "camera-video", String(title), String(body)])
+    Quickshell.execDetached(["/usr/bin/notify-send", "-a", "DJI Import", "-i", "camera-video",
+      Model.plainText(title, 120), Model.plainText(body, 300)])
   }
 
   function startImport() { start("import") }
@@ -133,9 +135,9 @@ Item {
   }
 
   function openFolder() {
-    var dest = card && card.dest ? card.dest : (result && result.dest ? result.dest : "")
-    if (dest === "") return
-    Quickshell.execDetached(["sh", "-c", "mkdir -p -- \"$1\" && exec xdg-open \"$1\"", "sh", dest])
+    var dest = Model.openTarget(card, result)
+    if (dest.charAt(0) !== "/") return
+    Quickshell.execDetached(["/usr/bin/xdg-open", dest])
   }
 
   signal folderPicked(string path)
@@ -156,6 +158,8 @@ Item {
   Process {
     id: watchProc
     running: false
+    clearEnvironment: true
+    environment: root.helperEnv
     stdout: SplitParser { onRead: function(line) { root.applyState(line) } }
     onExited: {
       if (root._restarting) return
@@ -167,6 +171,8 @@ Item {
   Process {
     id: importProc
     running: false
+    clearEnvironment: true
+    environment: root.helperEnv
     stdout: SplitParser { onRead: function(line) { root.handleEvent(line) } }
     onExited: function(exitCode) {
       if (!root.result) root.result = { kind: "error", message: root.t("import.stopped") }
@@ -189,6 +195,8 @@ Item {
   Process {
     id: ejectProc
     running: false
+    clearEnvironment: true
+    environment: root.helperEnv
     stdout: SplitParser {
       onRead: function(line) {
         var ev = Model.parseJson(line)
@@ -208,7 +216,7 @@ Item {
   Process {
     id: pickProc
     running: false
-    command: ["omarchy-file-select", "--directory", "--title", root.t("dest.pickTitle")]
+    command: ["/usr/bin/omarchy-file-select", "--directory", "--title", root.t("dest.pickTitle")]
     stdout: StdioCollector { id: pickOut; waitForEnd: true }
     onExited: function(exitCode) {
       var path = String(pickOut.text || "").split("\n")[0].trim()
