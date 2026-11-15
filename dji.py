@@ -410,33 +410,97 @@ def print_status(state):
         print(f"error: {state['error']}", file=sys.stderr)
 
 
+def human_duration(seconds):
+    seconds = int(max(0, seconds))
+    h, rest = divmod(seconds, 3600)
+    m, s = divmod(rest, 60)
+    return f"{h}:{m:02d}:{s:02d}" if h else f"{m}:{s:02d}"
+
+
+def render_bar(done, total, rate, width, prefix=""):
+    """One terminal line: prefix, bar, percent, bytes, speed, and time left."""
+    frac = min(1.0, done / total) if total else 1.0
+    stats = f" {frac * 100:3.0f}%  {human_bytes(done)} / {human_bytes(total)}"
+    if rate > 0:
+        stats += f"  {human_bytes(rate)}/s  {human_duration((total - done) / rate)} left"
+    bar_width = max(10, width - len(prefix) - len(stats) - 1)
+    filled = frac * bar_width
+    full = int(filled)
+    bar = "━" * full
+    if full < bar_width:
+        bar += ("╸" if filled - full >= 0.5 else "─") + "─" * (bar_width - full - 1)
+    return f"{prefix}{bar}{stats}"[: max(width, 20)]
+
+
 class HumanEmitter:
-    def __init__(self):
-        self.tty = sys.stdout.isatty()
+    RATE_WINDOW = 5.0
+
+    def __init__(self, stream=None, tty=None, width=None, clock=time.monotonic):
+        self.out = stream or sys.stdout
+        self.tty = self.out.isatty() if tty is None else tty
+        self.width = width
+        self.clock = clock
+        self.samples = []
+        self.done = self.total = 0
+        self.prefix = ""
+        self.dry = False
+        self.bar_shown = False
+
+    def line(self, text, err=False):
+        self.clear_bar()
+        print(text, file=sys.stderr if err else self.out, flush=True)
+
+    def clear_bar(self):
+        if self.bar_shown:
+            self.out.write("\r\033[K")
+            self.bar_shown = False
+
+    def rate(self):
+        now = self.clock()
+        self.samples.append((now, self.done))
+        while len(self.samples) > 2 and now - self.samples[0][0] > self.RATE_WINDOW:
+            self.samples.pop(0)
+        (t0, b0), (t1, b1) = self.samples[0], self.samples[-1]
+        return (b1 - b0) / (t1 - t0) if t1 - t0 >= 1.0 else 0.0
+
+    def draw(self):
+        if not self.tty or not self.total:
+            return
+        width = self.width or shutil.get_terminal_size((80, 24)).columns
+        self.out.write("\r\033[K" + render_bar(self.done, self.total, self.rate(), width - 1, self.prefix))
+        self.out.flush()
+        self.bar_shown = True
 
     def __call__(self, ev):
         kind = ev["event"]
         if kind == "start":
             mode = " (dry run)" if ev["dryRun"] else (" (move)" if ev["move"] else "")
-            print(f"{ev['model']}: {ev['files']} file(s), {human_bytes(ev['bytes'])} -> {ev['dest']}{mode}")
+            self.total = ev["bytes"]
+            self.dry = ev["dryRun"]
+            self.line(f"{ev['model']}: {ev['files']} file(s), {human_bytes(ev['bytes'])} -> {ev['dest']}{mode}")
         elif kind == "file":
             verb = "verify" if ev["action"] == "verify" else "copy"
-            print(f"[{ev['index']}/{ev['files']}] {verb} {ev['day']}/{ev['name']} ({human_bytes(ev['size'])})")
-        elif kind == "progress" and self.tty and ev["total"]:
-            pct = 100 * ev["bytes"] / ev["total"]
-            print(f"\r  {pct:5.1f}%  {human_bytes(ev['bytes'])} / {human_bytes(ev['total'])}", end="", flush=True)
-            if ev["bytes"] >= ev["total"]:
-                print()
+            self.prefix = f"{ev['index']}/{ev['files']} "
+            self.line(f"  {verb} {ev['day']}/{ev['name']} ({human_bytes(ev['size'])})")
+            if not self.dry:
+                self.draw()
+        elif kind == "progress":
+            self.done = ev["bytes"]
+            self.draw()
         elif kind == "done" and ev["dryRun"]:
-            print("Dry run: nothing was changed.")
+            self.line("Dry run: nothing was changed.")
         elif kind == "done":
-            print(f"Done: {ev['copied']} copied, {ev['skipped']} already there, {ev['deleted']} removed from card")
+            self.draw()
+            if self.bar_shown:
+                self.out.write("\n")
+                self.bar_shown = False
+            self.line(f"Done: {ev['copied']} copied, {ev['skipped']} already there, {ev['deleted']} removed from card")
             for err in ev["errors"]:
-                print(f"  error: {err}", file=sys.stderr)
+                self.line(f"  error: {err}", err=True)
         elif kind == "error":
-            print(f"error: {ev['message']}", file=sys.stderr)
+            self.line(f"error: {ev['message']}", err=True)
         elif kind == "cancelled":
-            print("\nCancelled; partial file removed.", file=sys.stderr)
+            self.line("Cancelled; partial file removed.", err=True)
 
 
 def json_emit(ev):

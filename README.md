@@ -48,7 +48,8 @@ folder, and <kbd>r</kbd> rescans.
 
 ## How it works
 
-`dji.py` does all the work, and you can also run it as a CLI on its own:
+`dji.py` does all the work, and you can also run it as a CLI on its own. In a
+terminal, `import` shows a live progress bar with speed and time left:
 
 ```sh
 ./dji.py status                 # camera, card, and what's new

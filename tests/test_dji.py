@@ -258,6 +258,57 @@ class ImportTests(unittest.TestCase):
         self.assertIn("cards", json.loads(lines[0]))
 
 
+class ProgressTests(unittest.TestCase):
+    def test_render_bar_fits_width(self):
+        line = dji.render_bar(28_400_000_000, 45_700_000_000, 41_200_000, 80, "3/11 ")
+        self.assertLessEqual(len(line), 80)
+        self.assertTrue(line.startswith("3/11 ━"))
+        self.assertIn(" 62%", line)
+        self.assertIn("41.2 MB/s", line)
+        self.assertIn("6:59 left", line)
+
+    def test_render_bar_edges(self):
+        self.assertNotIn("─", dji.render_bar(10, 10, 0, 60))
+        self.assertNotIn("━", dji.render_bar(0, 10, 0, 60))
+        self.assertNotIn("left", dji.render_bar(5, 10, 0, 60))
+        self.assertLessEqual(len(dji.render_bar(5, 10, 1e6, 20, "11/11 ")), 20)
+
+    def test_human_duration(self):
+        self.assertEqual(dji.human_duration(65), "1:05")
+        self.assertEqual(dji.human_duration(3725), "1:02:05")
+
+    def test_emitter_draws_and_finishes_bar(self):
+        import io
+
+        out = io.StringIO()
+        now = [0.0]
+        emit = dji.HumanEmitter(stream=out, tty=True, width=70, clock=lambda: now[0])
+        emit({"event": "start", "model": "OsmoAction4", "dest": "/d", "files": 1, "bytes": 100,
+              "move": False, "dryRun": False})
+        emit({"event": "file", "index": 1, "files": 1, "name": "a.MP4", "size": 100, "day": "2026-11-15",
+              "action": "copy"})
+        now[0] = 2.0
+        emit({"event": "progress", "bytes": 50, "total": 100})
+        self.assertIn(" 50%", out.getvalue().rsplit("\r", 1)[-1])
+        self.assertIn("25 B/s", out.getvalue())
+        emit({"event": "progress", "bytes": 100, "total": 100})
+        emit({"event": "done", "dest": "/d", "copied": 1, "skipped": 0, "deleted": 0, "errors": [],
+              "dryRun": False})
+        text = out.getvalue()
+        self.assertIn("100%", text)
+        self.assertTrue(text.endswith("Done: 1 copied, 0 already there, 0 removed from card\n"))
+
+    def test_emitter_without_tty_prints_no_bar(self):
+        import io
+
+        out = io.StringIO()
+        emit = dji.HumanEmitter(stream=out, tty=False)
+        emit({"event": "start", "model": "M", "dest": "/d", "files": 1, "bytes": 100, "move": False,
+              "dryRun": False})
+        emit({"event": "progress", "bytes": 50, "total": 100})
+        self.assertNotIn("━", out.getvalue())
+
+
 class Mp4Tests(unittest.TestCase):
     def test_moov_after_mdat(self):
         with tempfile.NamedTemporaryFile(suffix=".MP4", delete=False) as f:

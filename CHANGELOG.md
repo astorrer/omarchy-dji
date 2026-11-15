@@ -7,3 +7,4 @@
   `~/Videos/{model}/YYYY-MM-DD/` with atomic, optionally verified copies.
 - Options for photos, LRF proxies, removal from the card after a verified
   import, connect notifications, and a custom import path template.
+- CLI: live progress bar with speed and time left when run in a terminal.
