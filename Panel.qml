@@ -57,6 +57,7 @@ Panel {
     if (r.kind === "cancelled") return strings.t("result.cancelled")
     if (r.kind === "error") return strings.t("result.failed").arg(r.message)
     var parts = [strings.tn("result.copied", r.copied).arg(r.copied)]
+    if (r.renamed > 0) parts.push(strings.tn("result.renamed", r.renamed).arg(r.renamed))
     if (r.skipped > 0) parts.push(strings.tn("result.skipped", r.skipped).arg(r.skipped))
     if (r.deleted > 0) parts.push(strings.tn("result.deleted", r.deleted).arg(r.deleted))
     return parts.join(" · ")

@@ -66,8 +66,10 @@ It's safe to point the import path at a folder you already use:
 
 - Nothing in the destination is ever overwritten, moved, or deleted. New files
   only go into `YYYY-MM-DD/` subfolders.
-- If a different file with the same name is already sitting in a date folder,
-  the import reports it and leaves both files alone.
+- If a different file already has a clip's name in its date folder (say, from
+  a second camera of the same model), the clip is imported as
+  `DJI_…_0003_D-2.MP4` instead. Both files are kept, nothing is left behind on
+  the card, and later imports recognize the renamed copy.
 - Only missing folders are created. Existing folders and their permissions
   aren't touched.
 - The import won't start if the path is on the card itself, goes through a

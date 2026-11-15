@@ -205,14 +205,69 @@ class ImportTests(unittest.TestCase):
         self.assertTrue(v.exists(), "mismatched copy must not delete the original")
         self.assertTrue(self.done()["errors"])
 
-    def test_conflict_is_reported_not_overwritten(self):
+    def test_name_clash_is_imported_under_a_new_name(self):
         v = self.fx.add("DJI_20261115115741_0001_D.MP4", b"a" * 100)
         target = self.dest("2026-11-15", v.name)
         target.parent.mkdir(parents=True)
-        target.write_bytes(b"other")
-        self.assertEqual(self.run_import(), 1)
-        self.assertEqual(target.read_bytes(), b"other")
-        self.assertIn("already exists", self.done()["errors"][0])
+        target.write_bytes(b"other camera")
+        self.assertEqual(dji.status(**self.fx.kw())["cards"][0]["renamed"], 1)
+        self.assertEqual(self.run_import(), 0)
+        self.assertEqual(target.read_bytes(), b"other camera", "existing file untouched")
+        self.assertEqual(self.dest("2026-11-15", "DJI_20261115115741_0001_D-2.MP4").read_bytes(), b"a" * 100)
+        self.assertEqual(self.done()["renamed"], 1)
+        self.assertEqual(self.done()["errors"], [])
+        file_event = [e for e in self.events if e["event"] == "file"][0]
+        self.assertEqual(file_event["target"], "DJI_20261115115741_0001_D-2.MP4")
+
+    def test_renamed_copy_counts_as_imported_next_time(self):
+        v = self.fx.add("DJI_20261115115741_0001_D.MP4", b"a" * 100)
+        target = self.dest("2026-11-15", v.name)
+        target.parent.mkdir(parents=True)
+        target.write_bytes(b"other camera")
+        self.run_import()
+        self.events.clear()
+        self.assertEqual(dji.status(**self.fx.kw())["cards"][0]["newFiles"], 0)
+        self.assertEqual(self.run_import(), 0)
+        self.assertEqual(self.done()["copied"], 0)
+        self.assertFalse(self.dest("2026-11-15", "DJI_20261115115741_0001_D-3.MP4").exists())
+
+    def test_next_free_suffix(self):
+        v = self.fx.add("DJI_20261115115741_0001_D.MP4", b"a" * 100)
+        day = self.dest("2026-11-15", "x").parent
+        day.mkdir(parents=True)
+        (day / v.name).write_bytes(b"one")
+        (day / "DJI_20261115115741_0001_D-2.MP4").write_bytes(b"two")
+        self.run_import()
+        self.assertEqual((day / "DJI_20261115115741_0001_D-3.MP4").read_bytes(), b"a" * 100)
+
+    def test_same_name_twice_on_one_card(self):
+        self.fx.add("DJI_20261115115741_0001_D.MP4", b"first")
+        other = self.fx.mount / "DCIM/DJI_002"
+        other.mkdir()
+        (other / "DJI_20261115115741_0001_D.MP4").write_bytes(b"second!")
+        self.assertEqual(self.run_import(), 0)
+        day = self.dest("2026-11-15", "x").parent
+        self.assertEqual(sorted(f.read_bytes() for f in day.iterdir()), [b"first", b"second!"])
+
+    def test_move_with_rename_clears_the_card(self):
+        v = self.fx.add("DJI_20261115115741_0001_D.MP4", b"a" * 100)
+        target = self.dest("2026-11-15", v.name)
+        target.parent.mkdir(parents=True)
+        target.write_bytes(b"other camera")
+        self.assertEqual(self.run_import(move=True), 0)
+        self.assertFalse(v.exists())
+        self.assertEqual(target.read_bytes(), b"other camera")
+
+    def test_never_overwrites_a_file_that_appears_mid_import(self):
+        v = self.fx.add("DJI_20261115115741_0001_D.MP4", b"a" * 100)
+        target = self.dest("2026-11-15", v.name)
+        target.parent.mkdir(parents=True)
+        part = target.parent / "part"
+        part.write_bytes(b"a" * 100)
+        target.write_bytes(b"appeared")
+        with self.assertRaises(OSError):
+            dji.place_without_clobber(part, target)
+        self.assertEqual(target.read_bytes(), b"appeared")
 
     def test_dry_run_changes_nothing(self):
         self.fx.add("DJI_20261115115741_0001_D.MP4")

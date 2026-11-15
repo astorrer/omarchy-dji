@@ -37,6 +37,7 @@ KINDS = {
     ".lrf": "proxy",
 }
 NAME_DATE = re.compile(r"^DJI_(\d{4})(\d{2})(\d{2})")
+SUFFIXED = re.compile(r"^(.+)-(\d+)(\.[^.]+)$")
 MODEL_BYTES = re.compile(rb"(Osmo[A-Za-z0-9]{1,24})")
 CHUNK = 4 * 1024 * 1024
 PROGRESS_EVERY = 0.25
@@ -177,7 +178,9 @@ def library_index(dest, limit=500_000):
     """name -> [(size, path)] for every file already under dest, at any depth.
 
     Lets a library the user has reorganized (or one that predates this tool)
-    count as imported, so nothing is copied twice. Hidden entries are skipped.
+    count as imported, so nothing is copied twice. A copy renamed to dodge a
+    name clash (NAME-2.MP4) is also listed under its original name. Hidden
+    entries are skipped.
     """
     index = {}
     seen = 0
@@ -192,6 +195,9 @@ def library_index(dest, limit=500_000):
             except OSError:
                 continue
             index.setdefault(name, []).append((size, path))
+            renamed = SUFFIXED.match(name)
+            if renamed:
+                index.setdefault(renamed.group(1) + renamed.group(3), []).append((size, path))
             seen += 1
             if seen >= limit:
                 return index
@@ -215,9 +221,27 @@ def check_dest(dest, card_mount=None):
     return None
 
 
+def free_target(folder, name, claimed):
+    """folder/name, or folder/NAME-2.EXT, -3, ... if that name is taken."""
+    target = folder / name
+    stem, ext = os.path.splitext(name)
+    n = 1
+    while os.path.lexists(target) or target in claimed:
+        n += 1
+        target = folder / f"{stem}-{n}{ext}"
+    return target
+
+
 def scan(card_folders, dest, photos=True, proxies=False):
-    """Every importable file on the card with its target and status."""
+    """Every importable file on the card with its target and status.
+
+    status is "imported" when the same name and size already exist anywhere
+    under dest, else "new". A new file whose name is taken in its date folder
+    (another camera of the same model, say) gets a -2, -3, ... suffix instead
+    of being skipped, so nothing is ever left behind on the card.
+    """
     index = library_index(dest)
+    claimed = set()
     want = {"video"} | ({"photo"} if photos else set()) | ({"proxy"} if proxies else set())
     items = []
     for folder in card_folders:
@@ -233,16 +257,13 @@ def scan(card_folders, dest, photos=True, proxies=False):
                 size = src.stat().st_size
             except OSError:  # card pulled mid-scan
                 continue
-            target = dest / day_for(src, src.name) / src.name
+            day = dest / day_for(src, src.name)
             found = next((path for s, path in index.get(src.name, []) if s == size), None)
-            if found:
-                status = "imported"
-            elif os.path.lexists(target):
-                status = "conflict"
-            else:
-                status = "new"
+            target = day / src.name if found else free_target(day, src.name, claimed)
+            claimed.add(target)
             items.append({"src": src, "name": src.name, "kind": kind, "size": size, "target": target,
-                          "found": found, "status": status})
+                          "found": found, "status": "imported" if found else "new",
+                          "renamed": not found and target.name != src.name})
     return items
 
 
@@ -258,7 +279,7 @@ def summarize(items):
         "counts": counts,
         "newFiles": sum(c["new"] for c in counts.values()),
         "newBytes": new_bytes,
-        "conflicts": sum(1 for i in items if i["status"] == "conflict"),
+        "renamed": sum(1 for i in items if i["renamed"]),
     }
 
 
@@ -359,11 +380,25 @@ def copy_file(src, target, on_bytes, verify):
         os.utime(part, ns=(st.st_atime_ns, st.st_mtime_ns))
         if verify and hash_file(part, drop_cache=True) != h.digest():
             raise OSError(f"verification failed for {target.name}")
-        os.replace(part, target)
+        place_without_clobber(part, target)
     except BaseException:
         part.unlink(missing_ok=True)
         raise
     return h.digest()
+
+
+def place_without_clobber(part, target):
+    """Move part to target, failing instead of replacing anything there."""
+    try:
+        os.link(part, target)  # atomic, and refuses an existing target
+    except FileExistsError:
+        raise OSError(f"{target.name} appeared in the library during import; left on the card") from None
+    except OSError:  # filesystem without hard links
+        if os.path.lexists(target):
+            raise OSError(f"{target.name} appeared in the library during import; left on the card") from None
+        os.replace(part, target)
+        return
+    os.unlink(part)
 
 
 def free_space(path):
@@ -408,9 +443,8 @@ def run_import(card_mount=None, dest_template=DEFAULT_DEST, photos=True, proxies
               "free": free_space(dest)})
         return 1
 
-    copied = skipped = deleted = 0
-    errors = [f"{i['name']}: a different file with this name already exists" for i in items
-              if i["status"] == "conflict"]
+    copied = skipped = deleted = renamed = 0
+    errors = []
     done_bytes = 0
     last = 0.0
 
@@ -424,13 +458,15 @@ def run_import(card_mount=None, dest_template=DEFAULT_DEST, photos=True, proxies
 
     for index, item in enumerate(todo, 1):
         emit({"event": "file", "index": index, "files": len(todo), "name": item["name"], "size": item["size"],
-              "day": item["target"].parent.name, "action": "copy" if item["status"] == "new" else "verify"})
+              "day": item["target"].parent.name, "target": item["target"].name, "renamed": item["renamed"],
+              "action": "copy" if item["status"] == "new" else "verify"})
         if dry_run:
             continue
         try:
             if item["status"] == "new":
                 digest = copy_file(item["src"], item["target"], on_bytes, verify=move)
                 copied += 1
+                renamed += item["renamed"]
             else:
                 digest = hash_file(item["found"], drop_cache=True)
                 skipped += 1
@@ -444,7 +480,7 @@ def run_import(card_mount=None, dest_template=DEFAULT_DEST, photos=True, proxies
     skipped += sum(1 for i in items if i["status"] == "imported") if not move else 0
     emit({"event": "progress", "bytes": done_bytes, "total": copy_bytes})
     emit({"event": "done", "dest": str(dest), "copied": copied, "skipped": skipped, "deleted": deleted,
-          "errors": errors, "dryRun": dry_run})
+          "renamed": renamed, "errors": errors, "dryRun": dry_run})
     return 1 if errors else 0
 
 
@@ -550,7 +586,8 @@ class HumanEmitter:
         elif kind == "file":
             verb = "verify" if ev["action"] == "verify" else "copy"
             self.prefix = f"{ev['index']}/{ev['files']} "
-            self.line(f"  {verb} {ev['day']}/{ev['name']} ({human_bytes(ev['size'])})")
+            note = f", as {ev['target']} because the name is taken" if ev.get("renamed") else ""
+            self.line(f"  {verb} {ev['day']}/{ev['name']} ({human_bytes(ev['size'])}{note})")
             if not self.dry:
                 self.draw()
         elif kind == "progress":
@@ -563,7 +600,9 @@ class HumanEmitter:
             if self.bar_shown:
                 self.out.write("\n")
                 self.bar_shown = False
-            self.line(f"Done: {ev['copied']} copied, {ev['skipped']} already there, {ev['deleted']} removed from card")
+            extra = f" ({ev['renamed']} renamed to avoid a name clash)" if ev.get("renamed") else ""
+            self.line(f"Done: {ev['copied']} copied{extra}, {ev['skipped']} already there, "
+                      f"{ev['deleted']} removed from card")
             for err in ev["errors"]:
                 self.line(f"  error: {err}", err=True)
         elif kind == "error":

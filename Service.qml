@@ -103,6 +103,7 @@ Item {
       result = {
         kind: "done", dest: String(ev.dest || ""),
         copied: Number(ev.copied) || 0, skipped: Number(ev.skipped) || 0, deleted: Number(ev.deleted) || 0,
+        renamed: Number(ev.renamed) || 0,
         errors: Array.isArray(ev.errors) ? ev.errors.slice(0, 20).map(function(e) { return String(e).slice(0, 300) }) : []
       }
     } else if (ev.event === "error") {

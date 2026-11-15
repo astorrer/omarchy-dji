@@ -18,3 +18,6 @@
   replug; a card pulled mid-scan no longer stops detection.
 - The bar shows only the DJI logo; the new-file count and import progress
   are in its tooltip, and the icon takes the active color while importing.
+- A clip whose name is already taken in its date folder (e.g. by a second
+  camera of the same model) is imported as NAME-2.EXT instead of being left
+  on the card; the final rename never replaces an existing file.

@@ -34,6 +34,7 @@
   "import.cancelling": "Cancelling…",
   "import.stopped": "The import stopped unexpectedly",
   "result.copied": { "one": "Imported %1 file", "other": "Imported %1 files" },
+  "result.renamed": { "one": "%1 renamed (name was taken)", "other": "%1 renamed (names were taken)" },
   "result.skipped": { "one": "%1 already there", "other": "%1 already there" },
   "result.deleted": { "one": "%1 removed from card", "other": "%1 removed from card" },
   "result.errors": { "one": "%1 error", "other": "%1 errors" },
