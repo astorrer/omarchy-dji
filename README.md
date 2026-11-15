@@ -16,6 +16,18 @@ dated folders:
 
 It isn't affiliated with DJI. Plugins run unsandboxed inside `omarchy-shell`.
 
+> [!WARNING]
+> **This is early, in-development software. Use it at your own risk.** It's
+> only been tested with an Osmo Action 4; other DJI models should work but
+> haven't been tried. It's built to be careful: it never overwrites anything,
+> and "Remove from card after import" is off by default. Even with that
+> setting on, a card file is only deleted after its copy has been read back
+> from disk and verified. Still, bugs happen. **Keep a backup of anything you
+> can't afford to lose, and don't blame us if it eats your footage or wipes
+> your card.** The software is provided "as is", without warranty of any
+> kind (see [LICENSE](LICENSE)). If something goes wrong, please
+> [open an issue](https://github.com/astorrer/omarchy-dji/issues).
+
 ## Install
 
 ```sh
