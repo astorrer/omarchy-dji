@@ -28,3 +28,6 @@
 - Clean up card (panel button with a confirmation, or `dji.py clean`): removes
   only files already imported, each hash-verified against its library copy.
 - Rescan button in the panel header.
+- Cleaning up (or importing with removal) also deletes each removed clip's
+  `.LRF` proxy, plus leftover proxies whose clip is already in the library.
+  Proxies that are being imported, or whose clip isn't imported, are kept.

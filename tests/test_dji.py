@@ -401,6 +401,66 @@ class CleanTests(unittest.TestCase):
         progress = [e for e in self.events if e["event"] == "progress"][-1]
         self.assertEqual((progress["bytes"], progress["total"]), (100, 100))
 
+    def test_removes_proxy_of_cleaned_clip(self):
+        clip = self.imported("DJI_20261115115741_0001_D.MP4", b"a" * 100)
+        lrf = self.fx.add("DJI_20261115115741_0001_D.LRF", b"proxy")
+        self.assertEqual(dji.status(**self.fx.kw())["cards"][0]["cleanProxies"], 1)
+        self.assertEqual(self.run_clean(), 0)
+        self.assertFalse(clip.exists())
+        self.assertFalse(lrf.exists())
+        self.assertEqual(self.done()["proxiesDeleted"], 1)
+
+    def test_keeps_proxy_of_clip_not_yet_imported(self):
+        self.fx.add("DJI_20261115120524_0002_D.MP4", b"b" * 100)
+        lrf = self.fx.add("DJI_20261115120524_0002_D.LRF", b"proxy")
+        self.assertEqual(dji.status(**self.fx.kw())["cards"][0]["cleanProxies"], 0)
+        self.run_clean()
+        self.assertTrue(lrf.exists())
+
+    def test_removes_orphan_proxy_when_clip_is_in_library(self):
+        self.day.mkdir(parents=True)
+        (self.day / "DJI_20261115115741_0001_D.MP4").write_bytes(b"a" * 100)
+        lrf = self.fx.add("DJI_20261115115741_0001_D.LRF", b"proxy")  # clip already gone from card
+        card = dji.status(**self.fx.kw())["cards"][0]
+        self.assertEqual((card["importedFiles"], card["cleanProxies"]), (0, 1))
+        self.assertEqual(self.run_clean(), 0)
+        self.assertFalse(lrf.exists())
+
+    def test_keeps_orphan_proxy_when_clip_is_not_in_library(self):
+        lrf = self.fx.add("DJI_20261115115741_0001_D.LRF", b"proxy")
+        self.run_clean()
+        self.assertTrue(lrf.exists())
+
+    def test_keeps_proxy_being_imported_as_media(self):
+        self.imported("DJI_20261115115741_0001_D.MP4", b"a" * 100)
+        lrf = self.fx.add("DJI_20261115115741_0001_D.LRF", b"proxy")  # proxies on, not imported yet
+        self.assertEqual(self.run_clean(proxies=True), 0)
+        self.assertTrue(lrf.exists())
+
+    def test_keeps_proxy_when_its_clip_fails_verification(self):
+        clip = self.fx.add("DJI_20261115115741_0001_D.MP4", b"a" * 100)
+        self.day.mkdir(parents=True)
+        (self.day / clip.name).write_bytes(b"b" * 100)
+        lrf = self.fx.add("DJI_20261115115741_0001_D.LRF", b"proxy")
+        self.run_clean()
+        self.assertTrue(clip.exists())
+        self.assertTrue(lrf.exists())
+
+    def test_dry_run_counts_proxies_but_keeps_them(self):
+        self.imported("DJI_20261115115741_0001_D.MP4", b"a" * 100)
+        lrf = self.fx.add("DJI_20261115115741_0001_D.LRF", b"proxy")
+        self.run_clean(dry_run=True)
+        self.assertTrue(lrf.exists())
+        self.assertEqual(self.done()["proxiesDeleted"], 1)
+
+    def test_import_move_removes_proxy_too(self):
+        clip = self.fx.add("DJI_20261115115741_0001_D.MP4", b"a" * 100)
+        lrf = self.fx.add("DJI_20261115115741_0001_D.LRF", b"proxy")
+        self.assertEqual(dji.run_import(emit=self.events.append, move=True, **self.fx.kw()), 0)
+        self.assertFalse(clip.exists())
+        self.assertFalse(lrf.exists())
+        self.assertTrue((self.day / clip.name).exists())
+
     def test_mismatched_copy_keeps_card_file(self):
         v = self.fx.add("DJI_20261115115741_0001_D.MP4", b"a" * 100)
         self.day.mkdir(parents=True)

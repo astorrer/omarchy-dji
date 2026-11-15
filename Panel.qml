@@ -24,6 +24,18 @@ Panel {
   readonly property string cameraName: card ? Model.displayName(card.folder) : ""
   readonly property int pending: Model.newFiles(card)
   readonly property int importedCount: Model.importedFiles(card)
+  readonly property int proxyCount: Model.cleanProxies(card)
+  readonly property bool canClean: card !== null && (importedCount > 0 || proxyCount > 0)
+  readonly property string cleanMessage: {
+    if (!card) return ""
+    var where = Model.homeRelative(card.dest, dji.home)
+    if (importedCount === 0)
+      return strings.tn("clean.confirmOnlyProxies", proxyCount).arg(proxyCount).arg(where)
+    var text = strings.tn("clean.confirm", importedCount).arg(importedCount)
+      .arg(bytes(card.importedBytes)).arg(where)
+    if (proxyCount > 0) text += "\n\n" + strings.tn("clean.confirmProxies", proxyCount).arg(proxyCount)
+    return text
+  }
   property bool cleanConfirmOpen: false
   readonly property string destProblem: card && typeof card.destError === "string" ? card.destError.slice(0, 300) : ""
   readonly property real fraction: Model.percent(dji.progress.bytes, dji.progress.total)
@@ -60,6 +72,7 @@ Panel {
     if (r.kind === "error") return strings.t("result.failed").arg(r.message)
     if (r.mode === "clean") {
       var cleaned = [strings.tn("result.removed", r.deleted).arg(r.deleted)]
+      if (r.proxiesDeleted > 0) cleaned.push(strings.tn("result.proxies", r.proxiesDeleted).arg(r.proxiesDeleted))
       if (r.kept > 0) cleaned.push(strings.tn("result.kept", r.kept).arg(r.kept))
       return cleaned.join(" · ")
     }
@@ -101,7 +114,7 @@ Panel {
     function cancel(): string { dji.cancelImport(); return "ok" }
     // Opens the confirmation only; nothing is deleted until it is accepted.
     function cleanUp(): string {
-      if (!root.card || root.importedCount === 0 || dji.importing) return "nothing to clean"
+      if (!root.canClean || dji.importing) return "nothing to clean"
       root.open()
       root.cleanConfirmOpen = true
       return "confirm in panel"
@@ -391,10 +404,12 @@ Panel {
 
         Button {
           width: parent.width
-          visible: root.card !== null && !dji.importing && root.importedCount > 0
+          visible: root.canClean && !dji.importing
           iconText: "󰃢"
-          text: strings.tn("clean.button", root.importedCount).arg(root.importedCount)
-            .arg(root.bytes(root.card ? root.card.importedBytes : 0))
+          text: root.importedCount > 0
+            ? strings.tn("clean.button", root.importedCount).arg(root.importedCount)
+              .arg(root.bytes(root.card ? root.card.importedBytes : 0))
+            : strings.tn("clean.buttonProxies", root.proxyCount).arg(root.proxyCount)
           foreground: root.foreground
           accent: root.accent
           fontFamily: root.fontFamily
@@ -425,10 +440,7 @@ Panel {
         z: 10
         opened: root.cleanConfirmOpen
         selectedIndex: 0
-        message: root.card
-          ? strings.tn("clean.confirm", root.importedCount).arg(root.importedCount)
-            .arg(root.bytes(root.card.importedBytes)).arg(Model.homeRelative(root.card.dest, dji.home))
-          : ""
+        message: root.cleanMessage
         confirmText: strings.t("clean.confirmButton")
         foreground: root.foreground
         fontFamily: root.fontFamily

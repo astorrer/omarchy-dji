@@ -105,6 +105,11 @@ function importedFiles(card) {
   return isFinite(n) && n > 0 ? Math.floor(n) : 0
 }
 
+function cleanProxies(card) {
+  var n = card ? Number(card.cleanProxies) : 0
+  return isFinite(n) && n > 0 ? Math.floor(n) : 0
+}
+
 function newFiles(card) {
   var n = card ? Number(card.newFiles) : 0
   return isFinite(n) && n > 0 ? Math.floor(n) : 0

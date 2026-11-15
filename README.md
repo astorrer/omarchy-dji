@@ -51,7 +51,8 @@ library). Nothing runs as root, and the plugin makes no network calls.
 3. Once everything is imported, **Clean up card** frees the card. It deletes
    only files that are already in your library, and only after hashing both
    copies and checking they match. Files that aren't imported yet are never
-   touched. A confirmation comes first, with Cancel preselected.
+   touched. Each removed clip's `.LRF` proxy, a low-res copy the camera
+   makes, goes with it. A confirmation comes first, with Cancel preselected.
 
 | Setting | Default | |
 |---|---|---|

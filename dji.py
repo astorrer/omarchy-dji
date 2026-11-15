@@ -232,7 +232,7 @@ def free_target(folder, name, claimed):
     return target
 
 
-def scan(card_folders, dest, photos=True, proxies=False):
+def scan(card_folders, dest, photos=True, proxies=False, index=None):
     """Every importable file on the card with its target and status.
 
     status is "imported" when the same name and size already exist anywhere
@@ -240,7 +240,7 @@ def scan(card_folders, dest, photos=True, proxies=False):
     (another camera of the same model, say) gets a -2, -3, ... suffix instead
     of being skipped, so nothing is ever left behind on the card.
     """
-    index = library_index(dest)
+    index = library_index(dest) if index is None else index
     claimed = set()
     want = {"video"} | ({"photo"} if photos else set()) | ({"proxy"} if proxies else set())
     items = []
@@ -265,6 +265,34 @@ def scan(card_folders, dest, photos=True, proxies=False):
                           "found": found, "status": "imported" if found else "new",
                           "renamed": not found and target.name != src.name})
     return items
+
+
+def proxy_leftovers(card_folders, items, index, removing=()):
+    """Card .LRF proxies that are safe to delete alongside their clips.
+
+    A proxy qualifies when it is not itself being imported as media, a clip with
+    its name is in the library, and that clip is no longer on the card (or is in
+    `removing`, the clips being deleted now). Proxies are low-res copies the
+    camera derives from each clip, so nothing unique is lost.
+    """
+    media = {i["src"] for i in items}
+    removing = set(removing)
+    library_clips = {Path(name).stem.lower() for name in index if KINDS.get(Path(name).suffix.lower()) == "video"}
+    clips_on_card = set()
+    proxies = []
+    for folder in card_folders:
+        try:
+            entries = list(folder.iterdir())
+        except OSError:
+            continue
+        for f in entries:
+            kind = KINDS.get(f.suffix.lower())
+            if kind == "video" and f not in removing:
+                clips_on_card.add((f.parent, f.stem.lower()))
+            elif kind == "proxy" and f not in media:
+                proxies.append(f)
+    return sorted(f for f in proxies
+                  if (f.parent, f.stem.lower()) not in clips_on_card and f.stem.lower() in library_clips)
 
 
 def summarize(items):
@@ -341,7 +369,11 @@ def status(dest_template=DEFAULT_DEST, photos=True, proxies=False, mounts_text=N
             entry["dest"] = str(dest)
             entry["destExists"] = dest.is_dir()
             entry["destError"] = check_dest(dest, card["mount"])
-            entry.update(summarize(scan(card["folders"], dest, photos, proxies)))
+            index = library_index(dest)
+            items = scan(card["folders"], dest, photos, proxies, index)
+            entry.update(summarize(items))
+            imported = {i["src"] for i in items if i["status"] == "imported"}
+            entry["cleanProxies"] = len(proxy_leftovers(card["folders"], items, index, imported))
         except ValueError as exc:
             error = str(exc)
             entry["dest"] = ""
@@ -459,6 +491,7 @@ def run_import(card_mount=None, dest_template=DEFAULT_DEST, photos=True, proxies
 
     copied = skipped = deleted = renamed = 0
     errors = []
+    removed = set()
     done_bytes = 0
     last = 0.0
 
@@ -486,16 +519,30 @@ def run_import(card_mount=None, dest_template=DEFAULT_DEST, photos=True, proxies
                 skipped += 1
             if move:
                 if hash_file(item["src"], on_bytes=on_bytes if clean else None) != digest:
-                    raise OSError(f"{item['name']} changed on the card during import; left in place")
+                    raise OSError("doesn't match its copy in the library; left on the card")
                 item["src"].unlink()
                 deleted += 1
+                removed.add(item["src"])
         except OSError as exc:
             errors.append(f"{item['name']}: {exc.strerror or exc}")
+
+    proxies_deleted = 0
+    if move:
+        gone = {i["src"] for i in todo} if dry_run else removed
+        for proxy in proxy_leftovers(card["folders"], items, library_index(dest), gone):
+            if not dry_run:
+                try:
+                    proxy.unlink()
+                except OSError as exc:
+                    errors.append(f"{proxy.name}: {exc.strerror or exc}")
+                    continue
+            proxies_deleted += 1
     skipped += sum(1 for i in items if i["status"] == "imported") if not move else 0
     kept = sum(1 for i in items if i["status"] == "new") if clean else 0
     emit({"event": "progress", "bytes": done_bytes, "total": work_bytes})
     emit({"event": "done", "mode": mode, "dest": str(dest), "copied": copied, "skipped": 0 if clean else skipped,
-          "deleted": deleted, "renamed": renamed, "kept": kept, "errors": errors, "dryRun": dry_run})
+          "deleted": deleted, "proxiesDeleted": proxies_deleted, "renamed": renamed, "kept": kept,
+          "errors": errors, "dryRun": dry_run})
     return 1 if errors else 0
 
 
@@ -611,13 +658,16 @@ class HumanEmitter:
             self.done = ev["bytes"]
             self.draw()
         elif kind == "done" and ev["dryRun"]:
+            if ev.get("proxiesDeleted"):
+                self.line(f"  ...and {ev['proxiesDeleted']} LRF proxies of those clips")
             self.line("Dry run: nothing was changed.")
         elif kind == "done" and ev.get("mode") == "clean":
             self.draw()
             if self.bar_shown:
                 self.out.write("\n")
                 self.bar_shown = False
-            self.line(f"Done: {ev['deleted']} removed from card, {ev['kept']} not yet imported kept")
+            proxies = f" (+{ev['proxiesDeleted']} LRF proxies)" if ev.get("proxiesDeleted") else ""
+            self.line(f"Done: {ev['deleted']} removed from card{proxies}, {ev['kept']} not yet imported kept")
             for err in ev["errors"]:
                 self.line(f"  kept on card: {err}", err=True)
         elif kind == "done":
@@ -692,11 +742,13 @@ def confirm_clean(args, ask=input):
         return True  # run_import reports the problem
     c = cards[0]
     n = c.get("importedFiles", 0)
-    if not n:
+    if not n and not c.get("cleanProxies"):
         return True  # nothing to delete; run_import says so
     print(f"Delete {n} imported file(s) ({human_bytes(c.get('importedBytes', 0))}) from the card at {c['mount']}?")
     print(f"Each one is hashed and compared with its copy in {c['dest']} first; "
           f"{c.get('newFiles', 0)} file(s) not yet imported stay on the card.")
+    if c.get("cleanProxies"):
+        print(f"Their {c['cleanProxies']} .LRF proxies (low-res copies the camera makes) are removed too.")
     try:
         return ask("Type 'yes' to continue: ").strip().lower() == "yes"
     except EOFError:

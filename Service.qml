@@ -107,7 +107,7 @@ Item {
     } else if (ev.event === "done") {
       result = {
         kind: "done", mode: ev.mode === "clean" ? "clean" : "import", dest: String(ev.dest || ""),
-        kept: Number(ev.kept) || 0,
+        kept: Number(ev.kept) || 0, proxiesDeleted: Number(ev.proxiesDeleted) || 0,
         copied: Number(ev.copied) || 0, skipped: Number(ev.skipped) || 0, deleted: Number(ev.deleted) || 0,
         renamed: Number(ev.renamed) || 0,
         errors: Array.isArray(ev.errors) ? ev.errors.slice(0, 20).map(function(e) { return String(e).slice(0, 300) }) : []

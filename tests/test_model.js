@@ -4,7 +4,7 @@ const path = require("path")
 const assert = require("assert")
 
 const src = fs.readFileSync(path.join(__dirname, "..", "Model.js"), "utf8").replace(/^\.pragma library\s*/, "")
-const M = new Function(src + "\nreturn { PLUGIN_VERSION, PROJECT_URL, DEFAULT_DEST, validDest, displayName, formatBytes, percent, homeRelative, pickedTemplate, helperArgs, parseJson, normalizeState, count, importedFiles, newFiles, arrivals, mountSet }")()
+const M = new Function(src + "\nreturn { PLUGIN_VERSION, PROJECT_URL, DEFAULT_DEST, validDest, displayName, formatBytes, percent, homeRelative, pickedTemplate, helperArgs, parseJson, normalizeState, count, importedFiles, cleanProxies, newFiles, arrivals, mountSet }")()
 
 let passed = 0
 function test(name, fn) { fn(); passed++ }
@@ -92,6 +92,8 @@ test("counts", () => {
   assert.strictEqual(M.newFiles(null), 0)
   assert.strictEqual(M.importedFiles({ importedFiles: 13 }), 13)
   assert.strictEqual(M.importedFiles(null), 0)
+  assert.strictEqual(M.cleanProxies({ cleanProxies: 7 }), 7)
+  assert.strictEqual(M.cleanProxies({}), 0)
 })
 
 test("arrivals only reports new mounts with new media", () => {
