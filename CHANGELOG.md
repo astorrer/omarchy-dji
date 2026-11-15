@@ -21,3 +21,6 @@
 - A clip whose name is already taken in its date folder (e.g. by a second
   camera of the same model) is imported as NAME-2.EXT instead of being left
   on the card; the final rename never replaces an existing file.
+- Picking an import folder in the panel keeps one folder per camera by
+  appending `/{model}` (or swapping in `{model}` if the pick already is the
+  camera's folder).

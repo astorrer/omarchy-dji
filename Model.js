@@ -44,6 +44,20 @@ function homeRelative(path, home) {
   return p
 }
 
+// Import path template for a folder chosen in the picker: keep one folder per
+// camera by appending {model}, unless the pick already is that camera's folder.
+function pickedTemplate(path, home, folder) {
+  var raw = String(path || "").trim()
+  if (raw === "") return DEFAULT_DEST
+  var dir = homeRelative(raw, home) || "/"
+  var parts = dir.split("/")
+  if (folder && parts.length > 1 && parts[parts.length - 1] === folder) {
+    parts[parts.length - 1] = "{model}"
+    return parts.join("/")
+  }
+  return (dir === "/" ? "" : dir) + "/{model}"
+}
+
 function helperArgs(helper, command, opts) {
   var o = opts || {}
   var args = [HELPER_INTERPRETER, helper, command]

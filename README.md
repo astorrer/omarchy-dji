@@ -49,7 +49,7 @@ library). Nothing runs as root, and the plugin makes no network calls.
 
 | Setting | Default | |
 |---|---|---|
-| Import path | `~/Videos/{model}` | `{model}` is the name the camera reports, e.g. `OsmoAction4`, `OsmoPocket3`. Pick a folder with the 󰉋 button, or type a template in the widget settings. |
+| Import path | `~/Videos/{model}` | `{model}` is the name the camera reports, e.g. `OsmoAction4`, `OsmoPocket3`. Pick a folder with the 󰉋 button: `/{model}` is added so each camera keeps its own folder (picking `~/Footage` gives `~/Footage/OsmoAction4/…`). For any other layout, including no camera folder, type the path in the widget settings. |
 | Include photos | on | JPG/DNG stills go next to the clips. |
 | Include LRF proxies | off | The camera's low-res proxy copies. |
 | Remove from card after import | off | Deletes each card file only after its copy has been fsynced, re-read from disk, and its hash compared with the original. |

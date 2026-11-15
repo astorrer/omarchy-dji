@@ -4,7 +4,7 @@ const path = require("path")
 const assert = require("assert")
 
 const src = fs.readFileSync(path.join(__dirname, "..", "Model.js"), "utf8").replace(/^\.pragma library\s*/, "")
-const M = new Function(src + "\nreturn { PLUGIN_VERSION, PROJECT_URL, DEFAULT_DEST, validDest, displayName, formatBytes, percent, homeRelative, helperArgs, parseJson, normalizeState, count, newFiles, arrivals, mountSet }")()
+const M = new Function(src + "\nreturn { PLUGIN_VERSION, PROJECT_URL, DEFAULT_DEST, validDest, displayName, formatBytes, percent, homeRelative, pickedTemplate, helperArgs, parseJson, normalizeState, count, newFiles, arrivals, mountSet }")()
 
 let passed = 0
 function test(name, fn) { fn(); passed++ }
@@ -43,6 +43,20 @@ test("homeRelative", () => {
   assert.strictEqual(M.homeRelative("/home/a/", "/home/a"), "~")
   assert.strictEqual(M.homeRelative("/home/ab/x", "/home/a"), "/home/ab/x")
   assert.strictEqual(M.homeRelative("/mnt/nas", "/home/a"), "/mnt/nas")
+})
+
+test("pickedTemplate adds a per-camera folder", () => {
+  assert.strictEqual(M.pickedTemplate("/home/a/Footage", "/home/a", "OsmoAction4"), "~/Footage/{model}")
+  assert.strictEqual(M.pickedTemplate("/mnt/nas/", "/home/a", "OsmoAction4"), "/mnt/nas/{model}")
+  assert.strictEqual(M.pickedTemplate("/home/a", "/home/a", "OsmoAction4"), "~/{model}")
+  assert.strictEqual(M.pickedTemplate("/", "/home/a", ""), "/{model}")
+  assert.strictEqual(M.pickedTemplate("", "/home/a", ""), "~/Videos/{model}")
+})
+
+test("pickedTemplate recognizes the camera folder itself", () => {
+  assert.strictEqual(M.pickedTemplate("/home/a/Videos/OsmoAction4", "/home/a", "OsmoAction4"), "~/Videos/{model}")
+  assert.strictEqual(M.pickedTemplate("/mnt/nas/OsmoAction4", "/home/a", "OsmoAction4"), "/mnt/nas/{model}")
+  assert.strictEqual(M.pickedTemplate("/home/a/Videos/OsmoAction4", "/home/a", ""), "~/Videos/OsmoAction4/{model}")
 })
 
 test("helperArgs", () => {

@@ -173,7 +173,8 @@ Item {
     stdout: StdioCollector { id: pickOut; waitForEnd: true }
     onExited: function(exitCode) {
       var path = String(pickOut.text || "").split("\n")[0].trim()
-      if (exitCode === 0 && path.charAt(0) === "/") root.folderPicked(Model.homeRelative(path, root.home))
+      if (exitCode === 0 && path.charAt(0) === "/")
+        root.folderPicked(Model.pickedTemplate(path, root.home, root.card ? root.card.folder : ""))
     }
   }
 }
