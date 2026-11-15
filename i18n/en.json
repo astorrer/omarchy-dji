@@ -2,6 +2,7 @@
   "title": "DJI Import",
   "tooltip.card": "%1 · %2 new",
   "tooltip.unmounted": "%1 connected, no card mounted",
+  "tooltip.importing": "Importing · %1% · file %2 of %3",
   "empty.title": "No camera connected",
   "empty.help": "Plug in your DJI camera and choose Transfer mode, or insert its card.",
   "empty.unmounted": "%1 is connected, but no card is mounted. Choose Transfer mode on the camera.",

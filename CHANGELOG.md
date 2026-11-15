@@ -16,3 +16,5 @@
 - Bar count stays current: rescans every 5s while a card is present and when
   the panel opens, so CLI imports and library changes show up without a
   replug; a card pulled mid-scan no longer stops detection.
+- The bar shows only the DJI logo; the new-file count and import progress
+  are in its tooltip, and the icon takes the active color while importing.

@@ -25,9 +25,14 @@ Panel {
   readonly property int pending: Model.newFiles(card)
   readonly property string destProblem: card && typeof card.destError === "string" ? card.destError.slice(0, 300) : ""
   readonly property real fraction: Model.percent(dji.progress.bytes, dji.progress.total)
-  readonly property string barLabel: dji.importing
-    ? Math.round(fraction * 100) + "%"
-    : (pending > 0 ? Commons.I18n.formatNumber(pending, 0) : "")
+  readonly property string tooltip: {
+    if (dji.importing)
+      return strings.t("tooltip.importing").arg(Math.round(fraction * 100))
+        .arg(dji.progress.index).arg(dji.progress.files)
+    if (card) return strings.t("tooltip.card").arg(cameraName).arg(pending)
+    if (dji.state.unmounted.length) return strings.t("tooltip.unmounted").arg(dji.state.unmounted[0])
+    return strings.t("title")
+  }
 
   function writeSetting(key, value) {
     var entry = { id: moduleName }
@@ -91,12 +96,16 @@ Panel {
     id: button
     anchors.fill: parent
     bar: root.bar
-    text: "󰕧"
-    labelText: root.barLabel
+    // Icon only, like the rest of the bar: the active color marks an import
+    // in progress, and the tooltip carries counts and progress.
+    active: dji.importing
     dimmed: !root.card && !dji.importing
-    tooltipText: root.card
-      ? strings.t("tooltip.card").arg(root.cameraName).arg(root.pending)
-      : (dji.state.unmounted.length ? strings.t("tooltip.unmounted").arg(dji.state.unmounted[0]) : strings.t("title"))
+    tooltipText: root.tooltip
+    iconComponent: Component {
+      DjiIcon {
+        color: button.active && button.useActiveColor ? button.activeColor : button.foreground
+      }
+    }
     onPressed: function(buttonCode) {
       if (buttonCode === Qt.RightButton) dji.restartWatch()
       else if (buttonCode === Qt.MiddleButton) dji.openFolder()
@@ -141,12 +150,9 @@ Panel {
           fontFamily: root.fontFamily
           iconOpacity: root.card ? 1.0 : 0.5
           iconComponent: Component {
-            Text {
-              textFormat: Text.PlainText
-              text: "󰕧"
+            DjiIcon {
+              iconSize: Style.font.display * 0.75
               color: root.foreground
-              font.family: root.fontFamily
-              font.pixelSize: Style.font.display
             }
           }
         }

@@ -14,7 +14,8 @@ dated folders:
     └── DJI_20261115115741_0001_D.MP4
 ```
 
-It isn't affiliated with DJI. Plugins run unsandboxed inside `omarchy-shell`.
+It isn't affiliated with or endorsed by DJI. Plugins run unsandboxed inside
+`omarchy-shell`.
 
 > [!WARNING]
 > **This is early, in-development software. Use it at your own risk.** It's
@@ -40,8 +41,9 @@ library). Nothing runs as root, and the plugin makes no network calls.
 ## Usage
 
 1. Plug in the camera and pick **Transfer** mode on its screen, or put the
-   card in a card reader. Omarchy mounts it, the camera icon shows up on the
-   bar with the number of new files, and you get a notification.
+   card in a card reader. Omarchy mounts it, the DJI icon shows up on the bar,
+   and you get a notification saying how many files are new. Hover the icon
+   for the count. The icon takes the bar's active color while an import runs.
 2. Click the icon, check the destination, and press **Import**. You can
    cancel at any point. A cancelled copy never leaves a half-written file.
 
@@ -110,6 +112,10 @@ omarchy plugin enable io.github.astorrer.omarchy-dji
 ./tests/run     # ruff, unit tests, manifest checks, plugin validate, qmllint
 ```
 
+The shell doesn't hot-reload a symlinked plugin. Run `omarchy restart shell`
+to load QML changes.
+
 ## License
 
-MIT
+MIT. DJI, Osmo, and the DJI logo are trademarks of SZ DJI Technology Co.,
+Ltd. The logo is used only to identify compatible cameras.

@@ -73,7 +73,7 @@ QMLLINT=$(command -v qmllint || echo /usr/lib/qt6/bin/qmllint)
 if [[ -x $QMLLINT ]] && [[ -d $OMARCHY_PATH/shell ]]; then
   lint_dir=$(mktemp -d)
   ln -s "$OMARCHY_PATH/shell" "$lint_dir/qs"
-  run "qmllint" "$QMLLINT" -I "$lint_dir" -I "$OMARCHY_PATH/shell" Panel.qml Service.qml Model.js
+  run "qmllint" "$QMLLINT" -I "$lint_dir" -I "$OMARCHY_PATH/shell" Panel.qml Service.qml DjiIcon.qml Model.js
   rm -rf "$lint_dir"
 else
   echo "skip qmllint"
