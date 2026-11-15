@@ -61,7 +61,10 @@ Panel {
   implicitWidth: visible ? button.implicitWidth : 0
   implicitHeight: button.implicitHeight
 
-  onOpenedChanged: if (opened) Qt.callLater(function() { if (panel.loadedContent) panel.loadedContent.forceActiveFocus() })
+  onOpenedChanged: if (opened) {
+    if (!dji.importing) dji.restartWatch()
+    Qt.callLater(function() { if (panel.loadedContent) panel.loadedContent.forceActiveFocus() })
+  }
 
   Commons.Translations { id: strings; directory: Qt.resolvedUrl("i18n") }
 

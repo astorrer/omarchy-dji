@@ -13,3 +13,6 @@
 - Safe with existing folders: files already anywhere under the import path
   count as imported; refuses a destination on the card, through a file, or
   not writable; the panel says whether the folder exists or will be created.
+- Bar count stays current: rescans every 5s while a card is present and when
+  the panel opens, so CLI imports and library changes show up without a
+  replug; a card pulled mid-scan no longer stops detection.

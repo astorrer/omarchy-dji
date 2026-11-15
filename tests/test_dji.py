@@ -400,6 +400,75 @@ class LibraryTests(unittest.TestCase):
         self.assertEqual(dji.status(**self.fx.kw())["cards"][0]["newFiles"], 0)
 
 
+class WatchTests(unittest.TestCase):
+    """The bar must follow changes that do not come with a mount event."""
+
+    def run_watch(self, states, sigs, loops, refresh=5.0):
+        import argparse
+        import io
+
+        now = [0.0]
+        out = io.StringIO()
+        it_states = iter(states)
+        it_sigs = iter(sigs)
+
+        def get_status():
+            value = next(it_states)
+            if isinstance(value, Exception):
+                raise value
+            return value
+
+        def sleep(sec):
+            now[0] += sec
+
+        args = argparse.Namespace(interval=2.0, refresh=refresh)
+        dji.watch(args, get_status=get_status, signature=lambda: next(it_sigs), sleep=sleep,
+                  clock=lambda: now[0], out=out, loops=loops)
+        return [json.loads(line) for line in out.getvalue().splitlines()]
+
+    def card(self, new):
+        return {"cards": [{"mount": "/m", "newFiles": new}], "unmounted": [], "error": None}
+
+    def test_rescans_while_card_present(self):
+        # Card stays mounted (same signature); a CLI import drops newFiles 10 -> 0.
+        states = [self.card(10), self.card(10), self.card(0), self.card(0)]
+        lines = self.run_watch(states, ["a"] * 12, loops=12)
+        self.assertEqual([line["cards"][0]["newFiles"] for line in lines], [10, 0])
+
+    def test_no_rescans_without_a_card(self):
+        empty = {"cards": [], "unmounted": [], "error": None}
+        lines = self.run_watch([empty], ["a"] * 10, loops=10)  # a second status() call would raise
+        self.assertEqual(len(lines), 1)
+
+    def test_mount_change_rescans(self):
+        empty = {"cards": [], "unmounted": [], "error": None}
+        lines = self.run_watch([empty, self.card(10)], ["a", "a", "b"], loops=3)
+        self.assertEqual([len(line["cards"]) for line in lines], [0, 1])
+
+    def test_vanished_device_does_not_kill_the_watcher(self):
+        states = [OSError("gone"), self.card(3)]
+        lines = self.run_watch(states, ["a", "a"], loops=2)
+        self.assertEqual(lines[0]["cards"][0]["newFiles"], 3)
+
+
+class ModelCacheTests(unittest.TestCase):
+    def test_model_is_sniffed_once_per_file(self):
+        fx = Fixture(usb_product=None)
+        try:
+            fx.add("DJI_20261115115741_0001_D.MP4", mp4_with_model())
+            calls = []
+            original = dji.sniff_model
+            dji.sniff_model = lambda path: calls.append(path) or original(path)
+            try:
+                for _ in range(3):
+                    self.assertEqual(dji.status(**fx.kw())["cards"][0]["model"], "OsmoAction4")
+            finally:
+                dji.sniff_model = original
+            self.assertEqual(len(calls), 1)
+        finally:
+            fx.close()
+
+
 class Mp4Tests(unittest.TestCase):
     def test_moov_after_mdat(self):
         with tempfile.NamedTemporaryFile(suffix=".MP4", delete=False) as f:

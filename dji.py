@@ -227,9 +227,12 @@ def scan(card_folders, dest, photos=True, proxies=False):
             continue
         for src in entries:
             kind = KINDS.get(src.suffix.lower())
-            if kind not in want or not src.is_file():
+            try:
+                if kind not in want or not src.is_file():
+                    continue
+                size = src.stat().st_size
+            except OSError:  # card pulled mid-scan
                 continue
-            size = src.stat().st_size
             target = dest / day_for(src, src.name) / src.name
             found = next((path for s, path in index.get(src.name, []) if s == size), None)
             if found:
@@ -273,6 +276,9 @@ def find_cards(mounts_text=None, sysroot="/sys"):
     return cards
 
 
+_MODEL_CACHE = {}
+
+
 def card_model(card):
     if card["usbProduct"]:
         return card["usbProduct"]
@@ -283,10 +289,18 @@ def card_model(card):
             continue
         for kind in ("video", "photo"):
             for f in files:
-                if KINDS.get(f.suffix.lower()) == kind:
-                    found = sniff_model(f)
-                    if found:
-                        return found
+                if KINDS.get(f.suffix.lower()) != kind:
+                    continue
+                try:
+                    key = (str(f), f.stat().st_size)
+                except OSError:
+                    continue
+                if key not in _MODEL_CACHE:
+                    if len(_MODEL_CACHE) > 256:
+                        _MODEL_CACHE.clear()
+                    _MODEL_CACHE[key] = sniff_model(f)
+                if _MODEL_CACHE[key]:
+                    return _MODEL_CACHE[key]
     return "DJI"
 
 
@@ -563,20 +577,47 @@ def json_emit(ev):
     sys.stdout.flush()
 
 
-def watch(args):
+def device_signature():
+    return read_text("/proc/self/mounts"), tuple(u["product"] for u in usb_cameras())
+
+
+def watch(args, get_status=None, signature=device_signature, sleep=time.sleep, clock=time.monotonic,
+          out=None, loops=None):
+    """Print status whenever it changes.
+
+    Mounts and DJI USB devices are checked every --interval seconds. While a
+    card is present, status is also recomputed every --refresh seconds, so
+    imports from the CLI or a renamed library show up without a replug.
+    """
+    get_status = get_status or (lambda: status(args.dest, args.photos, args.proxies))
+    out = out or sys.stdout
     last_sig = None
     last_out = None
-    while True:
-        sig = (read_text("/proc/self/mounts"), tuple(u["product"] for u in usb_cameras()))
-        if sig != last_sig:
+    last_scan = 0.0
+    has_card = False
+    while loops is None or loops > 0:
+        if loops is not None:
+            loops -= 1
+        sig = signature()
+        due = has_card and clock() - last_scan >= args.refresh
+        if sig != last_sig or due:
+            if sig != last_sig and last_out is not None:
+                sleep(0.5)  # let a fresh mount settle
             last_sig = sig
-            time.sleep(0.5 if last_out is not None else 0)  # let a fresh mount settle
-            out = json.dumps(status(args.dest, args.photos, args.proxies), separators=(",", ":"))
-            if out != last_out:
-                last_out = out
-                sys.stdout.write(out + "\n")
-                sys.stdout.flush()
-        time.sleep(args.interval)
+            last_scan = clock()
+            try:
+                state = get_status()
+            except OSError:  # device vanished mid-scan; try again next tick
+                last_sig = None
+                sleep(args.interval)
+                continue
+            has_card = bool(state["cards"])
+            line = json.dumps(state, separators=(",", ":"))
+            if line != last_out:
+                last_out = line
+                out.write(line + "\n")
+                out.flush()
+        sleep(args.interval)
 
 
 def main(argv=None):
@@ -593,7 +634,8 @@ def main(argv=None):
     imp.add_argument("--move", action="store_true", help="delete card files after a verified copy")
     imp.add_argument("-n", "--dry-run", action="store_true", help="show what would happen")
     w = sub.add_parser("watch", parents=[common], help="stream status as NDJSON when devices change")
-    w.add_argument("--interval", type=float, default=2.0)
+    w.add_argument("--interval", type=float, default=2.0, help="device check period (seconds)")
+    w.add_argument("--refresh", type=float, default=5.0, help="rescan period while a card is present")
     args = parser.parse_args(argv)
 
     if args.command == "status":
