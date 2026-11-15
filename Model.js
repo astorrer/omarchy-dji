@@ -67,7 +67,7 @@ function helperArgs(helper, command, opts) {
   if (o.proxies === true) args.push("--proxies")
   if (command === "import" && o.move === true) args.push("--move")
   if (command === "clean") args.push("--yes")
-  if ((command === "import" || command === "clean") && o.card) args.push("--card", String(o.card))
+  if ((command === "import" || command === "clean" || command === "eject") && o.card) args.push("--card", String(o.card))
   return args
 }
 

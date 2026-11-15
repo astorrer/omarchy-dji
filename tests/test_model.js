@@ -67,6 +67,8 @@ test("helperArgs", () => {
   assert.ok(!M.helperArgs("/p", "watch", { move: true, card: "/c" }).includes("--move"))
   assert.deepStrictEqual(M.helperArgs("/p/dji.py", "clean", { dest: "/x", move: true, card: "/c" }),
     ["python3", "/p/dji.py", "clean", "--json", "--dest", "/x", "--yes", "--card", "/c"])
+  assert.ok(M.helperArgs("/p/dji.py", "eject", { card: "/c", move: true }).includes("--card"))
+  assert.ok(!M.helperArgs("/p/dji.py", "eject", { card: "/c", move: true }).includes("--move"))
 })
 
 test("parseJson", () => {

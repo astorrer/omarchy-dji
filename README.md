@@ -53,6 +53,10 @@ library). Nothing runs as root, and the plugin makes no network calls.
    copies and checking they match. Files that aren't imported yet are never
    touched. Each removed clip's `.LRF` proxy, a low-res copy the camera
    makes, goes with it. A confirmation comes first, with Cancel preselected.
+4. Press ⏏ in the panel header (or <kbd>e</kbd>) to eject. It flushes writes,
+   unmounts the card, and powers off the reader or camera. A notification
+   tells you when it's safe to unplug. If something still has the card open,
+   it says so and leaves the card mounted.
 
 | Setting | Default | |
 |---|---|---|
@@ -96,6 +100,7 @@ terminal, `import` shows a live progress bar with speed and time left:
 ./dji.py import --move          # copy, verify, then remove from the card
 ./dji.py clean                  # remove already-imported files (asks first)
 ./dji.py clean --dry-run        # what clean would remove
+./dji.py eject                  # flush, unmount, and power off the card
 ./dji.py import --dest '/mnt/nas/{model}' --no-photos --proxies
 ```
 

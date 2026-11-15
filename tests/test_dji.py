@@ -502,6 +502,63 @@ class CleanTests(unittest.TestCase):
             dji.status = original
 
 
+class EjectTests(unittest.TestCase):
+    def setUp(self):
+        self.fx = Fixture()
+        self.fx.add("DJI_20261115115741_0001_D.MP4")
+        self.calls = []
+        self.events = []
+        self.synced = []
+
+    def tearDown(self):
+        self.fx.close()
+
+    def fake_run(self, results):
+        import subprocess
+
+        def run(cmd, **kw):
+            self.calls.append(cmd)
+            code, err = results[len(self.calls) - 1]
+            return subprocess.CompletedProcess(cmd, code, "", err)
+        return run
+
+    def eject(self, results):
+        return dji.eject(emit=self.events.append, mounts_text=self.fx.mounts, sysroot=str(self.fx.sys),
+                         run=self.fake_run(results), sync=lambda: self.synced.append(True))
+
+    def test_syncs_unmounts_then_powers_off(self):
+        self.assertEqual(self.eject([(0, ""), (0, "")]), 0)
+        self.assertEqual(self.synced, [True])
+        self.assertEqual(self.calls[0], ["udisksctl", "unmount", "-b", "/dev/sda", "--no-user-interaction"])
+        self.assertEqual(self.calls[1], ["udisksctl", "power-off", "-b", "/dev/sda", "--no-user-interaction"])
+        self.assertEqual(self.events[-1]["event"], "ejected")
+        self.assertTrue(self.events[-1]["poweredOff"])
+
+    def test_busy_card_is_not_powered_off(self):
+        err = "Error unmounting /dev/sda: GDBus.Error:org.freedesktop.UDisks2.Error.DeviceBusy: target is busy"
+        self.assertEqual(self.eject([(1, err)]), 1)
+        self.assertEqual(len(self.calls), 1, "never power off a card that is still mounted")
+        self.assertIn("in use", self.events[-1]["message"])
+
+    def test_power_off_failure_still_counts_as_ejected(self):
+        self.assertEqual(self.eject([(0, ""), (1, "Error powering off drive: not supported")]), 0)
+        self.assertFalse(self.events[-1]["poweredOff"])
+        self.assertIn("not supported", self.events[-1]["note"])
+
+    def test_no_card(self):
+        self.assertEqual(dji.eject(emit=self.events.append, mounts_text="", sysroot=str(self.fx.sys),
+                                   run=self.fake_run([])), 1)
+        self.assertEqual(self.calls, [])
+
+    def test_parent_disk(self):
+        part = self.fx.sys / "devices/pci0/usb5/5-1/5-1:1.0/host0/block/sda/sda1"
+        part.mkdir()
+        (part / "partition").write_text("1")
+        (self.fx.sys / "class/block/sda1").symlink_to(part)
+        self.assertEqual(dji.parent_disk("/dev/sda1", str(self.fx.sys)), "/dev/sda")
+        self.assertEqual(dji.parent_disk("/dev/sda", str(self.fx.sys)), "/dev/sda")
+
+
 class LibraryTests(unittest.TestCase):
     """An import folder that already exists, possibly organized by hand."""
 

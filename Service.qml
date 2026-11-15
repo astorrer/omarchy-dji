@@ -28,6 +28,7 @@ Item {
   readonly property bool connected: card !== null || state.unmounted.length > 0
   property bool importing: false   // true while any job (import or clean) runs
   property string job: ""          // "import" | "clean"
+  property bool ejecting: false
   property bool cancelling: false
   property var progress: ({ bytes: 0, total: 0, index: 0, files: 0, name: "" })
   property var result: null
@@ -75,7 +76,7 @@ Item {
   function startClean() { start("clean") }
 
   function start(mode) {
-    if (importing || !card) return
+    if (importing || ejecting || !card) return
     result = null
     progress = { bytes: 0, total: 0, index: 0, files: 0, name: "" }
     job = mode
@@ -117,6 +118,14 @@ Item {
     } else if (ev.event === "cancelled") {
       result = { kind: "cancelled" }
     }
+  }
+
+  function ejectCard() {
+    if (importing || ejecting || !card) return
+    result = null
+    ejecting = true
+    ejectProc.command = Model.helperArgs(helperPath, "eject", { dest: importPath, card: card.mount })
+    ejectProc.running = true
   }
 
   function pickFolder() {
@@ -173,6 +182,25 @@ Item {
       root.importing = false
       root.cancelling = false
       root.job = ""
+      root.restartWatch()
+    }
+  }
+
+  Process {
+    id: ejectProc
+    running: false
+    stdout: SplitParser {
+      onRead: function(line) {
+        var ev = Model.parseJson(line)
+        if (!ev) return
+        if (ev.event === "ejected") root.result = { kind: "ejected", poweredOff: ev.poweredOff === true }
+        else if (ev.event === "error") root.result = { kind: "error", message: String(ev.message || "").slice(0, 400) }
+      }
+    }
+    onExited: {
+      if (!root.result) root.result = { kind: "error", message: root.t("eject.failed") }
+      if (root.result.kind === "ejected") root.notify(root.t("notify.ejectTitle"), root.t("notify.ejectBody"))
+      root.ejecting = false
       root.restartWatch()
     }
   }

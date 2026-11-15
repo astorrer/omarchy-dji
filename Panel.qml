@@ -69,6 +69,7 @@ Panel {
     var r = dji.result
     if (!r) return ""
     if (r.kind === "cancelled") return strings.t("result.cancelled")
+    if (r.kind === "ejected") return strings.t(r.poweredOff ? "result.ejected" : "result.unmounted")
     if (r.kind === "error") return strings.t("result.failed").arg(r.message)
     if (r.mode === "clean") {
       var cleaned = [strings.tn("result.removed", r.deleted).arg(r.deleted)]
@@ -112,6 +113,7 @@ Panel {
     function refresh(): string { dji.restartWatch(); return "ok" }
     function startImport(): string { dji.startImport(); return dji.importing ? "importing" : "no card" }
     function cancel(): string { dji.cancelImport(); return "ok" }
+    function eject(): string { dji.ejectCard(); return dji.ejecting ? "ejecting" : "nothing to eject" }
     // Opens the confirmation only; nothing is deleted until it is accepted.
     function cleanUp(): string {
       if (!root.canClean || dji.importing) return "nothing to clean"
@@ -174,6 +176,7 @@ Panel {
         if (t === "o" || t === "O") dji.openFolder()
         else if (t === "r" || t === "R") dji.restartWatch()
         else if (t === "i" || t === "I") dji.startImport()
+        else if (t === "e" || t === "E") dji.ejectCard()
       }
 
       Column {
@@ -185,14 +188,26 @@ Panel {
           id: hero
           width: parent.width
           trailingControl: Component {
-            PanelActionButton {
-              visible: dji.connected
-              iconText: "󰑐"
-              tooltipText: strings.t("refresh")
-              foreground: hero.foreground
-              fontFamily: hero.fontFamily
-              enabled: !dji.importing
-              onClicked: dji.restartWatch()
+            Row {
+              spacing: Style.space(2)
+              PanelActionButton {
+                visible: dji.card !== null
+                iconText: "󰇪"
+                tooltipText: strings.t("eject")
+                foreground: hero.foreground
+                fontFamily: hero.fontFamily
+                enabled: !dji.importing && !dji.ejecting
+                onClicked: dji.ejectCard()
+              }
+              PanelActionButton {
+                visible: dji.connected
+                iconText: "󰑐"
+                tooltipText: strings.t("refresh")
+                foreground: hero.foreground
+                fontFamily: hero.fontFamily
+                enabled: !dji.importing && !dji.ejecting
+                onClicked: dji.restartWatch()
+              }
             }
           }
           title: root.card ? root.cameraName : strings.t("title")

@@ -31,3 +31,5 @@
 - Cleaning up (or importing with removal) also deletes each removed clip's
   `.LRF` proxy, plus leftover proxies whose clip is already in the library.
   Proxies that are being imported, or whose clip isn't imported, are kept.
+- Safe eject (⏏ in the panel, `e`, or `dji.py eject`): sync, unmount, power
+  off via udisksctl; a busy card is reported and left mounted.

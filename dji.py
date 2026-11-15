@@ -4,6 +4,8 @@
   dji.py status [--dest TEMPLATE] [--no-photos] [--proxies] [--json]
   dji.py import [--card MOUNT] [--dest TEMPLATE] [--no-photos] [--proxies]
                 [--move] [--dry-run] [--json]
+  dji.py clean  [--card MOUNT] [--yes] [--dry-run] [--json]
+  dji.py eject  [--card MOUNT] [--json]
   dji.py watch  [--interval SEC] [--dest TEMPLATE] [--no-photos] [--proxies]
 
 Media lands in TEMPLATE/YYYY-MM-DD/, where TEMPLATE defaults to
@@ -23,6 +25,7 @@ import os
 import re
 import shutil
 import signal
+import subprocess
 import sys
 import time
 from datetime import datetime
@@ -546,6 +549,56 @@ def run_import(card_mount=None, dest_template=DEFAULT_DEST, photos=True, proxies
     return 1 if errors else 0
 
 
+# ---------------------------------------------------------------- eject
+
+
+def parent_disk(device, sysroot="/sys"):
+    """/dev/sda1 -> /dev/sda; a whole disk is returned as is."""
+    name = os.path.basename(device)
+    node = Path(sysroot) / "class/block" / name
+    if (node / "partition").exists():
+        try:
+            return "/dev/" + node.resolve().parent.name
+        except OSError:
+            pass
+    return device
+
+
+def udisks(*args, run=subprocess.run):
+    """Run udisksctl without prompting; return (ok, message)."""
+    try:
+        proc = run(["udisksctl", *args, "--no-user-interaction"], capture_output=True, text=True, timeout=60)
+    except FileNotFoundError:
+        return False, "udisksctl is not installed"
+    except subprocess.TimeoutExpired:
+        return False, "udisksctl timed out"
+    text = (proc.stderr or proc.stdout or "").strip()
+    text = re.sub(r"^Error \w+ [^:]*: ", "", text.splitlines()[-1] if text else "")
+    return proc.returncode == 0, text
+
+
+def eject(card_mount=None, emit=print, mounts_text=None, sysroot="/sys", run=subprocess.run, sync=os.sync):
+    """Flush, unmount, and power off the DJI card (or camera) so it is safe to unplug."""
+    cards = find_cards(mounts_text, sysroot)
+    if card_mount:
+        cards = [c for c in cards if os.path.realpath(c["mount"]) == os.path.realpath(card_mount)]
+    if len(cards) != 1:
+        emit({"event": "error", "message": "No DJI card found" if not cards
+              else "Several DJI cards are mounted; pick one with --card"})
+        return 1
+    card = cards[0]
+    sync()
+    ok, message = udisks("unmount", "-b", card["device"], run=run)
+    if not ok:
+        busy = "busy" in message.lower()
+        emit({"event": "error", "message": "The card is in use; close any file manager, terminal, or app "
+              "using it and try again" if busy else f"Could not unmount: {message or 'unknown error'}"})
+        return 1
+    powered, why = udisks("power-off", "-b", parent_disk(card["device"], sysroot), run=run)
+    emit({"event": "ejected", "mount": card["mount"], "poweredOff": powered, "note": "" if powered else why})
+    return 0
+
+
 # ---------------------------------------------------------------- output
 
 
@@ -682,6 +735,9 @@ class HumanEmitter:
                 self.line(f"  error: {err}", err=True)
         elif kind == "error":
             self.line(f"error: {ev['message']}", err=True)
+        elif kind == "ejected":
+            self.line("Ejected: safe to unplug." if ev["poweredOff"]
+                      else f"Unmounted: safe to unplug (could not power off: {ev['note'] or 'unsupported'}).")
         elif kind == "cancelled":
             self.line("Cancelled; partial file removed.", err=True)
 
@@ -768,6 +824,8 @@ def main(argv=None):
     imp.add_argument("--card", help="card mount point (default: the one mounted DJI card)")
     imp.add_argument("--move", action="store_true", help="delete card files after a verified copy")
     imp.add_argument("-n", "--dry-run", action="store_true", help="show what would happen")
+    ej = sub.add_parser("eject", parents=[common], help="flush, unmount, and power off the card so it is safe to unplug")
+    ej.add_argument("--card", help="card mount point (default: the one mounted DJI card)")
     cln = sub.add_parser("clean", parents=[common],
                          help="delete card files that are already imported (each verified by hash first)")
     cln.add_argument("--card", help="card mount point (default: the one mounted DJI card)")
@@ -791,6 +849,8 @@ def main(argv=None):
         except (KeyboardInterrupt, BrokenPipeError):
             return 0
     emit = json_emit if args.json else HumanEmitter()
+    if args.command == "eject":
+        return eject(args.card, emit)
 
     def cancel(signum, frame):
         raise Cancelled()
