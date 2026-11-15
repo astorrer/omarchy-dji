@@ -266,37 +266,22 @@ Panel {
           width: parent.width
           spacing: Style.space(6)
 
-          Toggle {
-            width: parent.width
+          OptionToggle {
             label: strings.t("opt.photos")
             description: strings.t("opt.photosHelp")
             checked: dji.includePhotos
-            foreground: root.foreground
-            accent: root.accent
-            fontFamily: root.fontFamily
-            enabled: !dji.importing
             onClicked: root.writeSetting("includePhotos", !dji.includePhotos)
           }
-          Toggle {
-            width: parent.width
+          OptionToggle {
             label: strings.t("opt.proxies")
             description: strings.t("opt.proxiesHelp")
             checked: dji.includeProxies
-            foreground: root.foreground
-            accent: root.accent
-            fontFamily: root.fontFamily
-            enabled: !dji.importing
             onClicked: root.writeSetting("includeProxies", !dji.includeProxies)
           }
-          Toggle {
-            width: parent.width
+          OptionToggle {
             label: strings.t("opt.move")
             description: strings.t("opt.moveHelp")
             checked: dji.deleteAfterImport
-            foreground: root.foreground
-            accent: root.accent
-            fontFamily: root.fontFamily
-            enabled: !dji.importing
             onClicked: root.writeSetting("deleteAfterImport", !dji.deleteAfterImport)
           }
         }
@@ -381,6 +366,17 @@ Panel {
         }
       }
     }
+  }
+
+  // Locked while an import runs, and dimmed so that reads at a glance.
+  component OptionToggle: Toggle {
+    width: parent ? parent.width : 0
+    foreground: root.foreground
+    accent: root.accent
+    fontFamily: root.fontFamily
+    enabled: !dji.importing
+    opacity: enabled ? 1.0 : 0.45
+    Behavior on opacity { NumberAnimation { duration: Style.duration(180); easing.type: Easing.OutCubic } }
   }
 
   component BodyText: Text {

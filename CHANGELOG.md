@@ -24,3 +24,4 @@
 - Picking an import folder in the panel keeps one folder per camera by
   appending `/{model}` (or swapping in `{model}` if the pick already is the
   camera's folder).
+- Option toggles dim while an import runs, not just lock.
