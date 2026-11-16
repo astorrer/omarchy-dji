@@ -19,6 +19,7 @@ its hash matches.
 """
 
 import argparse
+import errno
 import hashlib
 import json
 import os
@@ -428,14 +429,14 @@ def status(dest_template=DEFAULT_DEST, photos=True, proxies=False, mounts_text=N
 # ---------------------------------------------------------------- import
 
 
-def open_nofollow(path):
+def open_nofollow(path, dir_fd=None):
     """Open a file for reading, refusing a symlink."""
-    return os.fdopen(os.open(path, os.O_RDONLY | os.O_NOFOLLOW | os.O_CLOEXEC), "rb")
+    return os.fdopen(os.open(path, os.O_RDONLY | os.O_NOFOLLOW | os.O_CLOEXEC, dir_fd=dir_fd), "rb")
 
 
-def hash_file(path, drop_cache=False, on_bytes=None):
+def hash_file(path, drop_cache=False, on_bytes=None, dir_fd=None):
     h = hashlib.blake2b(digest_size=32)
-    with open_nofollow(path) as f:
+    with open_nofollow(path, dir_fd) as f:
         if drop_cache and hasattr(os, "posix_fadvise"):
             os.posix_fadvise(f.fileno(), 0, 0, os.POSIX_FADV_DONTNEED)
         while chunk := f.read(CHUNK):
@@ -445,52 +446,91 @@ def hash_file(path, drop_cache=False, on_bytes=None):
     return h.digest()
 
 
+def open_day_folder(day):
+    """Create the date folder if needed and return an fd for it.
+
+    Every later step works relative to this fd, never by pathname, so swapping
+    the folder for a symlink after this point (possible in a library other
+    people can write to) can't redirect a write. A date folder that's already
+    a symlink is refused. The library root above it is the user's choice and
+    may itself be a symlink, e.g. to a NAS mount.
+    """
+    day.parent.mkdir(parents=True, exist_ok=True)
+    parent = os.open(day.parent, os.O_RDONLY | os.O_DIRECTORY | os.O_CLOEXEC)
+    try:
+        try:
+            os.mkdir(day.name, 0o755, dir_fd=parent)
+        except FileExistsError:
+            pass
+        try:
+            return os.open(day.name, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW | os.O_CLOEXEC, dir_fd=parent)
+        except OSError as exc:
+            if exc.errno in (errno.ELOOP, errno.ENOTDIR):
+                raise OSError(f"{day.name} is a symlink or not a folder in the library; skipped") from None
+            raise
+    finally:
+        os.close(parent)
+
+
 def copy_file(src, target, on_bytes, verify):
     """Copy src to target via a hidden .part file; return the source hash.
 
-    The date folder must be a real folder, not a symlink, and the .part file
-    is created fresh with O_EXCL | O_NOFOLLOW, so a symlink planted in a shared
-    library can't redirect the write.
+    The date folder is opened once (open_day_folder) and the .part file is
+    created, verified, and linked into place relative to that folder's fd,
+    with O_EXCL | O_NOFOLLOW, so neither a planted symlink nor a folder
+    swapped mid-copy can redirect the write.
     """
-    target.parent.mkdir(parents=True, exist_ok=True)
-    if target.parent.is_symlink():
-        raise OSError(f"{target.parent.name} is a symlink in the library; skipped")
-    part = target.parent / f".{target.name}.part"
-    if os.path.lexists(part):
-        os.unlink(part)  # a leftover from an interrupted run (unlink never follows a symlink)
-    h = hashlib.blake2b(digest_size=32)
-    fd = os.open(part, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW | os.O_CLOEXEC, 0o644)
+    day = open_day_folder(target.parent)
+    part = f".{target.name}.part"
     try:
-        with os.fdopen(fd, "wb") as fo, open_nofollow(src) as fi:
-            while chunk := fi.read(CHUNK):
-                h.update(chunk)
-                fo.write(chunk)
-                on_bytes(len(chunk))
-            fo.flush()
-            os.fsync(fo.fileno())
-        st = os.stat(src)
-        os.utime(part, ns=(st.st_atime_ns, st.st_mtime_ns))
-        if verify and hash_file(part, drop_cache=True) != h.digest():
-            raise OSError(f"verification failed for {target.name}")
-        place_without_clobber(part, target)
-    except BaseException:
-        part.unlink(missing_ok=True)
-        raise
+        try:
+            os.unlink(part, dir_fd=day)  # a leftover from an interrupted run (unlink never follows a symlink)
+        except FileNotFoundError:
+            pass
+        h = hashlib.blake2b(digest_size=32)
+        fd = os.open(part, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW | os.O_CLOEXEC, 0o644, dir_fd=day)
+        try:
+            with os.fdopen(fd, "wb") as fo, open_nofollow(src) as fi:
+                while chunk := fi.read(CHUNK):
+                    h.update(chunk)
+                    fo.write(chunk)
+                    on_bytes(len(chunk))
+                fo.flush()
+                os.fsync(fo.fileno())
+                st = os.fstat(fi.fileno())
+                os.utime(fo.fileno(), ns=(st.st_atime_ns, st.st_mtime_ns))
+            if verify and hash_file(part, drop_cache=True, dir_fd=day) != h.digest():
+                raise OSError(f"verification failed for {target.name}")
+            place_without_clobber(part, target.name, dir_fd=day)
+        except BaseException:
+            try:
+                os.unlink(part, dir_fd=day)
+            except FileNotFoundError:
+                pass
+            raise
+    finally:
+        os.close(day)
     return h.digest()
 
 
-def place_without_clobber(part, target):
-    """Move part to target, failing instead of replacing anything there."""
+def place_without_clobber(part, target, dir_fd=None):
+    """Move part to target, failing instead of replacing anything there.
+
+    With dir_fd, both names are relative to that folder fd.
+    """
+    name = Path(target).name
     try:
-        os.link(part, target)  # atomic, and refuses an existing target
+        os.link(part, target, src_dir_fd=dir_fd, dst_dir_fd=dir_fd, follow_symlinks=False)  # atomic, no clobber
     except FileExistsError:
-        raise OSError(f"{target.name} appeared in the library during import; left on the card") from None
+        raise OSError(f"{name} appeared in the library during import; left on the card") from None
     except OSError:  # filesystem without hard links
-        if os.path.lexists(target):
-            raise OSError(f"{target.name} appeared in the library during import; left on the card") from None
-        os.replace(part, target)
-        return
-    os.unlink(part)
+        try:
+            os.stat(target, dir_fd=dir_fd, follow_symlinks=False)
+        except FileNotFoundError:
+            os.replace(part, target, src_dir_fd=dir_fd, dst_dir_fd=dir_fd)
+            return
+        raise OSError(f"{name} appeared in the library during import; left on the card") from None
+    os.unlink(part, dir_fd=dir_fd)
 
 
 def free_space(path):

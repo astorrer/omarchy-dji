@@ -2,7 +2,7 @@
   "schemaVersion": 1,
   "id": "io.github.astorrer.omarchy-dji",
   "name": "DJI Import",
-  "version": "0.1.1",
+  "version": "0.1.2",
   "author": "Aaron Storrer",
   "license": "MIT",
   "description": "Detects a DJI Osmo camera (Action, Pocket, 360) or its card and imports videos and photos into ~/Videos/<model>/YYYY-MM-DD, with verified copies and optional removal from the card.",

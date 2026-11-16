@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.1.2 — 2026-11-16
+
+- Imports no longer look up the date folder by path after checking it. The
+  folder is opened once, and the temp file is created, verified, and moved
+  into place relative to that open folder. Someone who can write to a shared
+  library can't swap the date folder for a symlink mid-import to redirect
+  your files elsewhere. (Reported by HANCORE-linux in marketplace review.)
+
 ## 0.1.1 — 2026-11-15
 
 Security hardening from a pre-marketplace audit:

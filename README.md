@@ -161,7 +161,9 @@ camera's local time. Copies keep the original modification time.
   shortened before they're shown anywhere. Every file and folder on the card
   that's a symlink is skipped. Metadata parsing and folder scans have hard
   limits.
-- **Writes can't be redirected.** Temp files are created with
+- **Writes can't be redirected.** The date folder is opened once, and every
+  write happens relative to that open folder, so swapping it for a symlink
+  mid-import does nothing. Temp files are created with
   `O_EXCL | O_NOFOLLOW`, date folders that are symlinks are refused, and the
   final rename never replaces an existing file. That holds even in a library
   other people can write to, like a shared NAS.

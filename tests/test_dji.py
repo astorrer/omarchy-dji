@@ -824,6 +824,37 @@ class SecurityTests(unittest.TestCase):
         self.assertEqual(list(outside.iterdir()), [])
         self.assertTrue(v.exists(), "a refused copy must never delete the original")
 
+    def test_date_folder_swapped_mid_copy_cannot_redirect_the_write(self):
+        # HANCORE-linux review of f727d6b: the date folder was checked, then
+        # looked up by path again, so a co-writer of a shared library could
+        # swap it for a symlink in between.
+        v = self.fx.add("DJI_20261115115741_0001_D.MP4", b"v" * (dji.CHUNK * 3))
+        outside = Path(self.fx.tmp.name) / "outside"
+        outside.mkdir()
+        day = self.lib_day()
+        moved = day.with_name("moved")
+        swapped = []
+
+        def swap(n):
+            if not swapped:
+                day.rename(moved)
+                day.symlink_to(outside)
+                swapped.append(True)
+
+        dji.copy_file(v, day / v.name, swap, verify=True)
+        self.assertTrue(swapped)
+        self.assertEqual(list(outside.iterdir()), [])
+        self.assertEqual((moved / v.name).read_bytes(), v.read_bytes())
+        self.assertEqual(sorted(p.name for p in moved.iterdir()), [v.name])
+
+    def test_date_folder_that_is_a_file_is_refused(self):
+        v = self.fx.add("DJI_20261115115741_0001_D.MP4")
+        self.lib_day().parent.mkdir(parents=True)
+        self.lib_day().write_text("not a folder")
+        with self.assertRaises(OSError):
+            dji.copy_file(v, self.lib_day() / v.name, lambda n: None, verify=False)
+        self.assertEqual(self.lib_day().read_text(), "not a folder")
+
     def test_open_nofollow_refuses_symlinks(self):
         real = Path(self.fx.tmp.name) / "real"
         real.write_bytes(b"x")
