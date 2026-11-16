@@ -37,8 +37,32 @@ It isn't affiliated with or endorsed by DJI. Plugins run unsandboxed inside
 omarchy plugin add https://github.com/astorrer/omarchy-dji.git --enable
 ```
 
-You need `python3`, which comes with Omarchy (it uses only the standard
-library). Nothing runs as root, and the plugin makes no network calls.
+### Dependencies
+
+Everything it needs ships with Omarchy. Nothing gets installed with pip, and
+nothing runs as root:
+
+| Dependency | Package | Used for |
+|---|---|---|
+| `/usr/bin/python3` | `python` | `dji.py`, standard library only |
+| `/usr/bin/udisksctl` | `udisks2` | Eject (unmount and power off) |
+| `/usr/bin/notify-send` | `libnotify` | Notifications for connect, import, clean up, and eject |
+| `/usr/bin/xdg-open` | `xdg-utils` | Opening the import folder |
+| `/usr/bin/omarchy-file-select` | `omarchy` | The import folder picker |
+
+The plugin makes no network calls.
+
+## Remove
+
+```sh
+omarchy plugin remove io.github.astorrer.omarchy-dji
+```
+
+This removes the plugin and its bar entry. The plugin creates no other files,
+caches, or services. Its settings live only in that bar entry in
+`~/.config/omarchy/shell.json`. Your imported footage in `~/Videos/<model>/`
+(or your custom import path) is left alone. Delete it yourself if you want it
+gone.
 
 ## Usage
 
