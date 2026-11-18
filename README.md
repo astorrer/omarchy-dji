@@ -168,7 +168,11 @@ camera's local time. Copies keep the original modification time.
   final rename never replaces an existing file. That holds even in a library
   other people can write to, like a shared NAS.
 - **Deleting is always verified.** A card file is only removed after its
-  library copy has been read back and its hash matches.
+  library copy has been read back and its hash matches, and after checking
+  that the library name points at that exact verified file.
+- **Placing never overwrites.** The copy is moved into place with a hard
+  link, or on exFAT/FAT an atomic no-replace rename. Both fail instead of
+  replacing a file. If neither works, the file stays on the card.
 
 Found a problem? Please [open an issue](https://github.com/astorrer/omarchy-dji/issues).
 

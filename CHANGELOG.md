@@ -1,5 +1,21 @@
 # Changelog
 
+## 0.1.3 — 2026-11-18
+
+Follow-up fixes from HANCORE-linux's marketplace review of 0.1.2:
+
+- The copy is verified by reading it back through the file it was written
+  to, never by reopening its name. After it's placed, the final name must
+  point at that exact file (same device and inode). Otherwise the import
+  fails and the card original is kept, even with "Remove from card" on. A
+  `.part` file swapped after verification in a shared library can no longer
+  get the card original deleted.
+- On filesystems without hard links (exFAT, FAT), the copy is placed with an
+  atomic no-replace rename (`renameat2(RENAME_NOREPLACE)`) instead of
+  check-then-`os.replace`, so a file that appears at the last moment is never
+  overwritten. If the filesystem supports neither, the file is left on the
+  card with an error instead of risking an overwrite.
+
 ## 0.1.2 — 2026-11-16
 
 - Imports no longer look up the date folder by path after checking it. The

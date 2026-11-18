@@ -1,9 +1,12 @@
+import contextlib
+import errno
 import json
 import os
 import sys
 import tempfile
 import unittest
 from pathlib import Path
+from unittest import mock
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 import dji  # noqa: E402
@@ -846,6 +849,70 @@ class SecurityTests(unittest.TestCase):
         self.assertEqual(list(outside.iterdir()), [])
         self.assertEqual((moved / v.name).read_bytes(), v.read_bytes())
         self.assertEqual(sorted(p.name for p in moved.iterdir()), [v.name])
+
+    # HANCORE-linux review of c34dbd2: the .part file was re-opened by name to
+    # verify and published by name, and the no-hard-link fallback did a
+    # check-then-replace that could overwrite.
+
+    def test_part_swapped_after_verification_keeps_card_original(self):
+        v = self.fx.add("DJI_20261115115741_0001_D.MP4", b"real" * 50)
+        day = self.lib_day()
+        original = dji.hash_open_file
+
+        def hash_then_swap(f, drop_cache=False):
+            digest = original(f, drop_cache)
+            part = day / f".{v.name}.part"
+            part.unlink()
+            part.write_bytes(b"evil" * 50)
+            return digest
+
+        with mock.patch.object(dji, "hash_open_file", hash_then_swap):
+            self.assertEqual(dji.run_import(emit=self.events.append, move=True, **self.fx.kw()), 1)
+        self.assertEqual(v.read_bytes(), b"real" * 50, "card original must survive")
+        self.assertIn("replaced in the library", self.events[-1]["errors"][0])
+
+    def no_hard_links(self, before=None):
+        def link(*a, **k):
+            if before:
+                before()
+            raise PermissionError(errno.EPERM, "Operation not permitted")
+
+        def replace(*a, **k):
+            raise AssertionError("os.replace can overwrite; placement must never use it")
+
+        stack = contextlib.ExitStack()
+        stack.enter_context(mock.patch.object(dji.os, "link", link))
+        stack.enter_context(mock.patch.object(dji.os, "replace", replace))
+        return stack
+
+    def test_no_hard_links_uses_atomic_rename(self):
+        v = self.fx.add("DJI_20261115115741_0001_D.MP4", b"clip" * 50)
+        with self.no_hard_links():
+            self.assertEqual(dji.run_import(emit=self.events.append, move=True, **self.fx.kw()), 0)
+        self.assertEqual(sorted(p.name for p in self.lib_day().iterdir()), [v.name])
+        self.assertEqual((self.lib_day() / v.name).read_bytes(), b"clip" * 50)
+        self.assertFalse(v.exists())
+
+    def test_no_hard_links_never_overwrites_a_file_that_appears(self):
+        v = self.fx.add("DJI_20261115115741_0001_D.MP4", b"clip" * 50)
+        target = self.lib_day() / v.name
+        with self.no_hard_links(before=lambda: target.write_bytes(b"theirs")):
+            self.assertEqual(dji.run_import(emit=self.events.append, move=True, **self.fx.kw()), 1)
+        self.assertEqual(target.read_bytes(), b"theirs")
+        self.assertTrue(v.exists())
+        self.assertEqual(sorted(p.name for p in self.lib_day().iterdir()), [v.name])
+
+    def test_no_safe_placement_refuses_instead_of_replacing(self):
+        v = self.fx.add("DJI_20261115115741_0001_D.MP4")
+
+        def unsupported(*a, **k):
+            raise OSError(errno.EINVAL, "Invalid argument")
+
+        with self.no_hard_links(), mock.patch.object(dji, "rename_noreplace", unsupported):
+            self.assertEqual(dji.run_import(emit=self.events.append, move=True, **self.fx.kw()), 1)
+        self.assertTrue(v.exists())
+        self.assertEqual(list(self.lib_day().iterdir()), [])
+        self.assertIn("without risking an overwrite", self.events[-1]["errors"][0])
 
     def test_date_folder_that_is_a_file_is_refused(self):
         v = self.fx.add("DJI_20261115115741_0001_D.MP4")

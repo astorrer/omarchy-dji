@@ -475,10 +475,14 @@ def open_day_folder(day):
 def copy_file(src, target, on_bytes, verify):
     """Copy src to target via a hidden .part file; return the source hash.
 
-    The date folder is opened once (open_day_folder) and the .part file is
-    created, verified, and linked into place relative to that folder's fd,
-    with O_EXCL | O_NOFOLLOW, so neither a planted symlink nor a folder
-    swapped mid-copy can redirect the write.
+    The date folder is opened once (open_day_folder), and the .part file is
+    created in it with O_EXCL | O_NOFOLLOW and kept open. Verification reads
+    the copy back through that same open file, never by name. After placing
+    it, the final name must point at that exact file (same device and inode),
+    otherwise the import fails and the card original is kept. So neither a
+    planted symlink, a folder swapped mid-copy, nor a .part file replaced
+    after verification can put unverified data in the library or cost the
+    card original.
     """
     day = open_day_folder(target.parent)
     part = f".{target.name}.part"
@@ -488,49 +492,105 @@ def copy_file(src, target, on_bytes, verify):
         except FileNotFoundError:
             pass
         h = hashlib.blake2b(digest_size=32)
-        fd = os.open(part, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW | os.O_CLOEXEC, 0o644, dir_fd=day)
+        fd = os.open(part, os.O_RDWR | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW | os.O_CLOEXEC, 0o644, dir_fd=day)
+        mine = os.fstat(fd)
         try:
-            with os.fdopen(fd, "wb") as fo, open_nofollow(src) as fi:
-                while chunk := fi.read(CHUNK):
-                    h.update(chunk)
-                    fo.write(chunk)
-                    on_bytes(len(chunk))
-                fo.flush()
-                os.fsync(fo.fileno())
-                st = os.fstat(fi.fileno())
+            with os.fdopen(fd, "r+b") as fo:
+                with open_nofollow(src) as fi:
+                    while chunk := fi.read(CHUNK):
+                        h.update(chunk)
+                        fo.write(chunk)
+                        on_bytes(len(chunk))
+                    fo.flush()
+                    os.fsync(fo.fileno())
+                    st = os.fstat(fi.fileno())
                 os.utime(fo.fileno(), ns=(st.st_atime_ns, st.st_mtime_ns))
-            if verify and hash_file(part, drop_cache=True, dir_fd=day) != h.digest():
-                raise OSError(f"verification failed for {target.name}")
-            place_without_clobber(part, target.name, dir_fd=day)
+                if verify and hash_open_file(fo, drop_cache=True) != h.digest():
+                    raise OSError(f"verification failed for {target.name}")
+                place_without_clobber(part, target.name, dir_fd=day, expect=mine)
         except BaseException:
-            try:
-                os.unlink(part, dir_fd=day)
-            except FileNotFoundError:
-                pass
+            unlink_if_same(part, day, mine)
             raise
     finally:
         os.close(day)
     return h.digest()
 
 
-def place_without_clobber(part, target, dir_fd=None):
+def hash_open_file(f, drop_cache=False):
+    """Hash an already-open file from the start, without reopening it by name."""
+    f.seek(0)
+    if drop_cache and hasattr(os, "posix_fadvise"):
+        os.posix_fadvise(f.fileno(), 0, 0, os.POSIX_FADV_DONTNEED)
+    h = hashlib.blake2b(digest_size=32)
+    while chunk := f.read(CHUNK):
+        h.update(chunk)
+    return h.digest()
+
+
+def same_file(a, b):
+    return (a.st_dev, a.st_ino) == (b.st_dev, b.st_ino)
+
+
+def unlink_if_same(name, dir_fd, expect):
+    """Remove name only if it's still the file we created."""
+    try:
+        if expect is None or same_file(os.stat(name, dir_fd=dir_fd, follow_symlinks=False), expect):
+            os.unlink(name, dir_fd=dir_fd)
+    except FileNotFoundError:
+        pass
+
+
+RENAME_NOREPLACE = 1
+AT_FDCWD = -100
+_renameat2 = None
+
+
+def rename_noreplace(src, dst, dir_fd=None):
+    """renameat2(RENAME_NOREPLACE): an atomic rename that never replaces dst."""
+    global _renameat2
+    if _renameat2 is None:
+        import ctypes
+
+        libc = ctypes.CDLL(None, use_errno=True)
+        _renameat2 = getattr(libc, "renameat2", False)
+        if _renameat2:
+            _renameat2.argtypes = [ctypes.c_int, ctypes.c_char_p, ctypes.c_int, ctypes.c_char_p, ctypes.c_uint]
+    if not _renameat2:
+        raise OSError(errno.ENOSYS, "renameat2 is not available")
+    fd = AT_FDCWD if dir_fd is None else dir_fd
+    if _renameat2(fd, os.fsencode(src), fd, os.fsencode(dst), RENAME_NOREPLACE) != 0:
+        import ctypes
+
+        err = ctypes.get_errno()
+        raise OSError(err, os.strerror(err))
+
+
+def place_without_clobber(part, target, dir_fd=None, expect=None):
     """Move part to target, failing instead of replacing anything there.
 
-    With dir_fd, both names are relative to that folder fd.
+    With dir_fd, both names are relative to that folder fd. With expect (the
+    fstat of the file we wrote), the placed name must be that exact file.
     """
     name = Path(target).name
+    clash = f"{name} appeared in the library during import; left on the card"
     try:
         os.link(part, target, src_dir_fd=dir_fd, dst_dir_fd=dir_fd, follow_symlinks=False)  # atomic, no clobber
+        linked = True
     except FileExistsError:
-        raise OSError(f"{name} appeared in the library during import; left on the card") from None
-    except OSError:  # filesystem without hard links
+        raise OSError(clash) from None
+    except OSError:  # filesystem without hard links (exFAT, FAT): atomic no-replace rename instead
         try:
-            os.stat(target, dir_fd=dir_fd, follow_symlinks=False)
-        except FileNotFoundError:
-            os.replace(part, target, src_dir_fd=dir_fd, dst_dir_fd=dir_fd)
-            return
-        raise OSError(f"{name} appeared in the library during import; left on the card") from None
-    os.unlink(part, dir_fd=dir_fd)
+            rename_noreplace(part, target, dir_fd)
+        except OSError as exc:
+            if exc.errno == errno.EEXIST:
+                raise OSError(clash) from None
+            raise OSError(f"this filesystem can't place {name} without risking an overwrite; "
+                          "left on the card") from None
+        linked = False
+    if expect is not None and not same_file(os.stat(target, dir_fd=dir_fd, follow_symlinks=False), expect):
+        raise OSError(f"{name} was replaced in the library during import; left on the card")
+    if linked:
+        unlink_if_same(part, dir_fd, expect)
 
 
 def free_space(path):

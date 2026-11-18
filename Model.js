@@ -1,6 +1,6 @@
 .pragma library
 
-var PLUGIN_VERSION = "0.1.2"
+var PLUGIN_VERSION = "0.1.3"
 var PROJECT_URL = "https://github.com/astorrer/omarchy-dji"
 var DEFAULT_DEST = "~/Videos/{model}"
 // Helpers run by absolute path, isolated (-I ignores PYTHON* variables and the
